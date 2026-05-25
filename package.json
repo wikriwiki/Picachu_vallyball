@@ -1,0 +1,16 @@
+{
+  "name": "picachu-holdem-volleyball",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web game combining Texas Hold'em and Pikachu Volleyball with a shared fight-money economy.",
+  "scripts": {
+    "test": "node test/test_hand.js && node test/test_holdem.js && node test/test_volley.js && node test/test_economy.js && node test/test_integration.js",
+    "test:dom": "node test/test_dom.js && node test/test_dom_bettor.js",
+    "test:all": "npm test && npm run test:dom",
+    "shots": "node test/screenshot.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "puppeteer": "^22.0.0"
+  }
+}

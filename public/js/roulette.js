@@ -6,6 +6,7 @@ import { outlined } from './avatar.js';
 import { sfx } from './sfx.js';
 
 const TAU = Math.PI * 2;
+const POINTER = -Math.PI / 2; // 포인터 위치(아래쪽)
 
 function numbersTexture() {
   const S = 1024;
@@ -16,16 +17,15 @@ function numbersTexture() {
   g.textBaseline = 'middle';
   for (let k = 0; k < 10; k++) {
     const a = ((k + 0.5) / 10) * TAU;
-    const x = S / 2 + Math.cos(a) * 0.66 * (S / 2);
-    const y = S / 2 - Math.sin(a) * 0.66 * (S / 2);
+    const x = S / 2 + Math.cos(a) * 0.76 * (S / 2);
+    const y = S / 2 - Math.sin(a) * 0.76 * (S / 2);
     g.save();
     g.translate(x, y);
-    g.rotate(-a + Math.PI / 2);
-    g.font = 'bold 150px sans-serif';
-    g.lineWidth = 18;
-    g.strokeStyle = 'rgba(40,30,70,0.9)';
-    g.strokeText(String(k + 1), 0, 0);
+    g.rotate(-a - Math.PI / 2); // 숫자 윗부분이 중심을 향함 → 아래 포인터 칸이 똑바로 읽힘
+    g.font = 'bold 170px sans-serif';
     g.fillStyle = '#ffffff';
+    g.shadowColor = 'rgba(0,0,0,0.25)';
+    g.shadowOffsetY = 6;
     g.fillText(String(k + 1), 0, 0);
     g.restore();
   }
@@ -42,7 +42,7 @@ export class Roulette {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-    this.camera.position.set(0, -1.6, 6.2);
+    this.camera.position.set(0, -1.9, 6.6);
     this.camera.lookAt(0, 0, 0);
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(1, 2, 4);
@@ -51,15 +51,34 @@ export class Roulette {
     this.mat = rouletteMaterial(numbersTexture());
     this.disc = new THREE.Mesh(new THREE.CircleGeometry(1.5, 96), this.mat);
     this.scene.add(this.disc);
-    // 받침대 + 포인터
-    const base = outlined(this.scene, new THREE.CylinderGeometry(1.62, 1.7, 0.3, 64), toonMaterial(0x6741d9, { specular: 0.6 }));
-    base.rotation.x = Math.PI / 2;
-    base.position.z = -0.17;
-    const ptr = outlined(this.scene, new THREE.ConeGeometry(0.16, 0.42, 3), toonMaterial(0xff2d55, { specular: 0.8 }));
-    ptr.rotation.z = Math.PI;
-    ptr.position.set(0, 1.62, 0.12);
+    // 원판 두께(흰 테두리) + 가운데 팔각 허브 + 테두리 핀 — 원판과 함께 회전
+    const white = toonMaterial(0xffffff, { specular: 0.5, rim: 0.3 });
+    const rimM = outlined(this.disc, new THREE.CylinderGeometry(1.52, 1.55, 0.22, 72), white, { thickness: 0.015 });
+    rimM.rotation.x = Math.PI / 2;
+    rimM.position.z = -0.12;
+    const hub = outlined(this.disc, new THREE.CylinderGeometry(0.28, 0.34, 0.36, 8), white, { thickness: 0.015 });
+    hub.rotation.x = Math.PI / 2;
+    hub.position.z = 0.18;
+    const cap = outlined(this.disc, new THREE.CylinderGeometry(0.2, 0.28, 0.08, 8), white, { thickness: 0.012 });
+    cap.rotation.x = Math.PI / 2;
+    cap.position.z = 0.4;
+    const pegG = new THREE.CylinderGeometry(0.035, 0.035, 0.22, 8);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * TAU;
+      const peg = outlined(this.disc, pegG, white, { thickness: 0.01 });
+      peg.rotation.x = Math.PI / 2;
+      peg.position.set(Math.cos(a) * 1.5, Math.sin(a) * 1.5, 0.1);
+    }
+    // 포인터: 아래쪽 흰 막대 + 공 (원작처럼 아래 칸을 가리킴)
+    const ptr = new THREE.Group();
+    const stick = outlined(ptr, new THREE.CylinderGeometry(0.035, 0.035, 0.5, 8), white, { thickness: 0.012 });
+    stick.position.y = -0.25;
+    const ball = outlined(ptr, new THREE.SphereGeometry(0.14, 16, 12), white, { thickness: 0.015 });
+    ball.position.y = -0.55;
+    ptr.position.set(0, -1.42, 0.25);
+    this.scene.add(ptr);
     this.pointer = ptr;
-    this.angle = Math.PI / 2 - 0.5 * (TAU / 10);
+    this.angle = POINTER - 0.5 * (TAU / 10);
     this.vel = 0.3;
     this.mode = 'idle';
     this.lastSeg = -1;
@@ -90,7 +109,7 @@ export class Roulette {
   // 서버 결과값으로 감속 정지
   spinTo(value, quick = false) {
     const k = value - 1;
-    const target = Math.PI / 2 - (k + 0.5) * (TAU / 10);
+    const target = POINTER - (k + 0.5) * (TAU / 10);
     const start = this.angle;
     const turns = quick ? 1 : 3 + Math.random();
     // 칸 중앙 근처(칸 폭의 ±30%)에 멈춤
@@ -132,12 +151,12 @@ export class Roulette {
     this.mat.uniforms.uTime.value = t;
     this.disc.rotation.z = this.angle;
     // 칸 경계 통과 시 틱 소리 + 포인터 흔들림
-    const seg = Math.floor(((Math.PI / 2 - this.angle) / TAU) * 10);
+    const seg = Math.floor(((POINTER - this.angle) / TAU) * 10);
     if (seg !== this.lastSeg) {
-      if (this.mode !== 'idle' && this.mode !== 'stopped') { sfx.tick(); this.pointer.rotation.z = Math.PI + 0.35; }
+      if (this.mode !== 'idle' && this.mode !== 'stopped') { sfx.tick(); this.pointer.rotation.z = 0.35; }
       this.lastSeg = seg;
     }
-    this.pointer.rotation.z += (Math.PI - this.pointer.rotation.z) * Math.min(1, dt * 14);
+    this.pointer.rotation.z += (0 - this.pointer.rotation.z) * Math.min(1, dt * 14);
     this.renderer.render(this.scene, this.camera);
   }
 

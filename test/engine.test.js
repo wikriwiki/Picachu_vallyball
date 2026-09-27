@@ -54,4 +54,50 @@ for (const mode of ['full', 'adult', 'kids']) {
   assert.throws(() => applyAction(s, 'b', { type: 'spin', power: 0.5 }));
   applyAction(s, 'a', { type: 'spin', power: 0.5 });
 }
+// docs/ADR.md §12.2 칸 구성표와 일치하는지 (ADR 과 코드의 일관성 보장)
+{
+  const expected = {
+    baby: { start: 1, star1: 6, star2: 2, star3: 1, hiyari: 1, choice: 1, card: 1, end: 1 },
+    elem: { start: 1, star1: 10, star2: 4, star3: 1, hiyari: 3, ghost: 1, choice: 3, card: 1, payday: 3, end: 1 },
+    middle: { start: 1, star1: 10, star2: 4, star3: 1, hiyari: 3, ghost: 1, choice: 3, card: 1, payday: 3, end: 1 },
+    high: { start: 1, star1: 8, star2: 4, star3: 1, hiyari: 3, ghost: 1, love: 3, choice: 2, card: 1, payday: 3, end: 1 },
+    adult1: { start: 1, star1: 8, star2: 5, star3: 2, hiyari: 3, ghost: 2, love: 3, choice: 3, card: 2, challenge: 5, baby: 2, payday: 8, 'stop:marriage': 1, end: 1 },
+    adult2: { start: 1, star1: 8, star2: 5, star3: 2, hiyari: 3, ghost: 3, love: 2, choice: 3, card: 1, challenge: 5, baby: 3, payday: 8, 'stop:house': 1, end: 1 },
+    final: { start: 1, star1: 8, star2: 4, star3: 2, hiyari: 3, ghost: 3, love: 1, choice: 3, card: 1, payday: 5, goal: 1 },
+  };
+  ERAS.forEach((e, i) => {
+    const c = {};
+    BOARD.tiles.filter((t) => t.era === i).forEach((t) => { const k = t.type + (t.stop ? ':' + t.stop : ''); c[k] = (c[k] || 0) + 1; });
+    assert.deepEqual(c, expected[e.id], 'ADR §12.2 mismatch: ' + e.id);
+    const ts = BOARD.tiles.filter((t) => t.era === i);
+    for (let k = 1; k < ts.length; k++) assert.ok(!(ts[k].type === ts[k - 1].type && ts[k].type !== 'star1'), 'no repeats');
+  });
+}
+
+// 물방울 칸: 능력치 변동 룰렛 (ADR §6.6) / 유령 칸: 보험으로 무효 (ADR §6.7)
+{
+  const hi = BOARD.tiles.find((t) => t.type === 'hiyari' && t.era === 1);
+  const s = createGame({ players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], seed: 9 });
+  s.era = 1; s.players[0].tile = hi.i - 1;
+  s.players[0].cards = ['fixed'];
+  applyAction(s, 'a', { type: 'card', index: 0, number: 1 });
+  applyAction(s, 'a', { type: 'spin', power: 0 });
+  assert.equal(s.pending.purpose, 'hiyari');
+  const stat = s.pending.stat;
+  const before = s.players[0].stats[stat];
+  const ev = applyAction(s, 'a', { type: 'spin', power: 0 });
+  const v = ev.find((e) => e.t === 'spin').value;
+  const d = [-12, -10, -8, -6, -5, -4, -3, -2, 3, 6][v - 1];
+  assert.equal(s.players[0].stats[stat], Math.max(0, Math.min(100, before + d)));
+
+  const gh = BOARD.tiles.find((t) => t.type === 'ghost' && t.era === 1);
+  const s2 = createGame({ players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], seed: 3 });
+  s2.era = 1; s2.players[0].tile = gh.i - 1; s2.players[0].cards = ['fixed', 'insurance']; s2.players[0].insurance = 1;
+  const f0 = s2.players[0].fortune;
+  applyAction(s2, 'a', { type: 'card', index: 0, number: 1 });
+  applyAction(s2, 'a', { type: 'spin', power: 0 });
+  assert.equal(s2.players[0].insurance, 0);
+  assert.equal(s2.players[0].fortune, f0, '보험이 유령 칸을 막음');
+}
+
 console.log('engine ok — actions:', totalActions, JSON.stringify(stats));

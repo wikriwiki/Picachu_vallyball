@@ -3,7 +3,7 @@
 import {
   ERAS, ADULT_ERA, FINAL_ERA, JOBS, jobById, meetsReq, gradeIndex, CLUBS, CARDS, CARD_POOL, HAND_MAX,
   TREASURES, HOUSES, NOTE_UNIT, NOTE_REPAY, KID_GIFT, GOAL_BONUS, AWARD_BONUS, WEDDING_GIFT, BIRTH_GIFT,
-  SPOUSE_NAMES, KID_NAMES, EVENTS, HIYARI, LOVE, CHOICES, LUCKY, FORTUNES, FORTUNE_START, STAT_NAMES, STAT_MAX,
+  SPOUSE_NAMES, KID_NAMES, EVENTS, HIYARI, HIYARI_SPIN, GHOST, LOVE, CHOICES, STAR3, FORTUNES, FORTUNE_START, STAT_NAMES, STAT_MAX,
 } from './data.js';
 import { BOARD } from './board.js';
 
@@ -168,7 +168,7 @@ function gainTreasure(s, p, ev) {
 function applyEffects(s, p, e, ev) {
   if (!e) return;
   if (e.money != null) {
-    const amt = e.money === 'salary' ? incomeUnit(s, p) : e.money;
+    const amt = e.money === 'salary' ? incomeUnit(s, p) : e.money === 'salary2' ? incomeUnit(s, p) * 2 : e.money;
     addMoney(s, p, amt, amt >= 0 ? '수입' : '지출', ev);
   }
   for (const k of ['int', 'phy', 'sen']) if (e[k]) addStat(s, p, k, e[k], ev);
@@ -361,20 +361,21 @@ function resolveTile(s, p, ev) {
   const ek = eraKey(s.era);
   ev.push({ t: 'land', pid: p.id, tile: t.i, type: t.type });
   switch (t.type) {
-    case 'event': {
+    case 'star1':
+    case 'star2': {
+      // 별 칸 Lv1: 시대 이벤트 그대로 / Lv2: 좋은 효과(양수) 2배 (docs/ADR.md §6.1)
       const list = EVENTS[ek] || EVENTS[g] || EVENTS.adult;
       const e = choose(s, list);
-      msg(s, ev, p, e.t, 'event');
-      applyEffects(s, p, e.e, ev);
-      if (s.era >= ADULT_ERA && rnd(s) < 0.25) {
-        if (p.fortune >= 5) { msg(s, ev, p, `운세 「${FORTUNES[p.fortune]}」 덕분에 특별 보너스!`, 'lucky'); addMoney(s, p, 1000, '운세 보너스', ev); }
-        else if (p.fortune <= 1) { msg(s, ev, p, `운세 「${FORTUNES[p.fortune]}」... 불운이 덮쳤다.`, 'bad'); addMoney(s, p, -800, '불운', ev); }
-      }
+      const lv2 = t.type === 'star2';
+      msg(s, ev, p, (lv2 ? '★★ ' : '★ ') + e.t, lv2 ? 'lucky' : 'event');
+      applyEffects(s, p, lv2 ? doublePositive(e.e) : e.e, ev);
+      fortuneBonus(s, p, ev);
       break;
     }
-    case 'lucky': {
-      const e = choose(s, g === 'adult' || g === 'final' ? LUCKY.adult : LUCKY.kid);
-      msg(s, ev, p, e.t, 'lucky');
+    case 'star3': {
+      // 별 칸 Lv3 (빛나는 칸): 호화 이벤트 (docs/ADR.md §6.2)
+      const e = choose(s, g === 'adult' || g === 'final' ? STAR3.adult : STAR3.kid);
+      msg(s, ev, p, '★★★ ' + e.t, 'lucky');
       applyEffects(s, p, e.e, ev);
       break;
     }
@@ -392,18 +393,29 @@ function resolveTile(s, p, ev) {
       break;
     }
     case 'hiyari': {
+      // 물방울 칸 (아슬아슬): 문구 후 능력치 변동 룰렛 (docs/ADR.md §6.6)
+      const list = g === 'baby' ? HIYARI.baby : g === 'kid' || g === 'teen' ? HIYARI.kid : g === 'final' ? HIYARI.final : HIYARI.adult;
+      const e = choose(s, list);
+      msg(s, ev, p, e.t, 'bad');
+      const stat = choose(s, ['int', 'phy', 'sen']);
+      s.pending = { type: 'spin', playerId: p.id, purpose: 'hiyari', stat, title: `아슬아슬 룰렛! ${STAT_NAMES[stat]}이(가) 변동합니다` };
+      break;
+    }
+    case 'ghost': {
+      // 유령 칸 (대위기): 큰 손해 + 운세 -1, 보험 카드로 1회 무효 (docs/ADR.md §6.7)
       if (p.insurance > 0) {
         p.insurance -= 1;
         const idx = p.cards.indexOf('insurance');
         if (idx >= 0) p.cards.splice(idx, 1);
         ev.push({ t: 'card', pid: p.id, card: 'insurance', used: true });
-        msg(s, ev, p, '아찔! ...하지만 보험 카드로 막아냈다!', 'lucky');
+        msg(s, ev, p, '유령이 나타났다! ...하지만 보험 카드로 막아냈다!', 'lucky');
         break;
       }
-      const list = g === 'baby' ? HIYARI.baby : g === 'kid' || g === 'teen' ? HIYARI.kid : g === 'final' ? HIYARI.final : HIYARI.adult;
+      const list = g === 'baby' ? GHOST.baby : g === 'kid' || g === 'teen' ? GHOST.kid : g === 'final' ? GHOST.final : GHOST.adult;
       const e = choose(s, list);
-      msg(s, ev, p, e.t, 'bad');
+      msg(s, ev, p, '👻 ' + e.t, 'bad');
       applyEffects(s, p, e.e, ev);
+      addFortune(s, p, -1, ev);
       break;
     }
     case 'choice': {
@@ -487,6 +499,21 @@ function resolveTile(s, p, ev) {
   }
 }
 
+function doublePositive(e) {
+  const out = { ...e };
+  for (const k of ['int', 'phy', 'sen', 'love']) if (out[k] > 0) out[k] *= 2;
+  if (typeof out.money === 'number' && out.money > 0) out.money *= 2;
+  if (out.money === 'salary') out.money = 'salary2';
+  return out;
+}
+
+function fortuneBonus(s, p, ev) {
+  if (s.era >= ADULT_ERA && rnd(s) < 0.25) {
+    if (p.fortune >= 5) { msg(s, ev, p, `운세 「${FORTUNES[p.fortune]}」 덕분에 특별 보너스!`, 'lucky'); addMoney(s, p, 1000, '운세 보너스', ev); }
+    else if (p.fortune <= 1) { msg(s, ev, p, `운세 「${FORTUNES[p.fortune]}」... 불운이 덮쳤다.`, 'bad'); addMoney(s, p, -800, '불운', ev); }
+  }
+}
+
 function rankupNeed(p) {
   const job = jobById(p.job);
   const gi = gradeIndex(p.stats[job.key]);
@@ -556,6 +583,10 @@ export function applyAction(s, playerId, action) {
     } else if (pend.purpose === 'gamble') {
       if (value >= 5) { msg(s, ev, p, '투자 대성공! 3배가 되었다!', 'lucky'); addMoney(s, p, pend.amount * 2, '투자 수익', ev); }
       else { msg(s, ev, p, '투자 실패... 돈을 잃었다.', 'bad'); addMoney(s, p, -pend.amount, '투자 손실', ev); }
+    } else if (pend.purpose === 'hiyari') {
+      const d = HIYARI_SPIN[value - 1];
+      msg(s, ev, p, d >= 0 ? `위기를 기회로! ${STAT_NAMES[pend.stat]} +${d}` : `${STAT_NAMES[pend.stat]} ${d}...`, d >= 0 ? 'lucky' : 'bad');
+      addStat(s, p, pend.stat, d, ev);
     } else if (pend.purpose === 'marriage') {
       if (value >= pend.need) marry(s, p, ev);
       else { msg(s, ev, p, '이번엔 인연이 아니었다. 솔로 라이프를 즐긴다!', 'info'); addStat(s, p, 'sen', 5, ev); }

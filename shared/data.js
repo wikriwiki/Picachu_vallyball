@@ -34,17 +34,20 @@ export const ERAS = [
 export const ADULT_ERA = 4;
 export const FINAL_ERA = 6;
 
+// 칸 종류 (docs/ADR.md §6). 색은 원작 화면 기준: 별 Lv1 옅은 노랑 / Lv2 주황 / Lv3 빛나는 금색, 물방울 = 아슬아슬, 유령 = 대위기
 export const TILE_INFO = {
   start: { name: '출발', color: 0xffffff },
-  event: { name: '이벤트', color: 0x4dabf7 },
-  lucky: { name: '럭키', color: 0xffd43b },
+  star1: { name: '별 칸 Lv1', color: 0xfff1a8 },
+  star2: { name: '별 칸 Lv2', color: 0xffa23a },
+  star3: { name: '별 칸 Lv3', color: 0xffd23f },
   payday: { name: '월급날', color: 0x51cf66 },
-  love: { name: '연애', color: 0xff8fab },
-  hiyari: { name: '아찔', color: 0xfa5252 },
-  choice: { name: '선택', color: 0xb197fc },
-  card: { name: '카드', color: 0xff922b },
+  love: { name: '하트 칸', color: 0xff7eb6 },
+  hiyari: { name: '물방울 칸 (아슬아슬)', color: 0x7cc7ff },
+  ghost: { name: '유령 칸 (대위기)', color: 0x6c4fc4 },
+  choice: { name: '선택 칸', color: 0x8ce0c4 },
+  card: { name: '카드 칸', color: 0x5c9dff },
   challenge: { name: '랭크업 찬스', color: 0x22b8cf },
-  baby: { name: '아기', color: 0xf783ac },
+  baby: { name: '아기 칸', color: 0xf7a8c8 },
   stop: { name: 'STOP', color: 0xe03131 },
   end: { name: '다음 시대로', color: 0xffffff },
   goal: { name: 'GOAL', color: 0xffd700 },
@@ -193,7 +196,7 @@ export const CLUBS = [
 export const CARDS = {
   fixed: { name: '지정 룰렛 카드', desc: '원하는 숫자(1~10)만큼 전진', timing: 'spin' },
   double: { name: '더블 카드', desc: '룰렛 결과의 2배만큼 전진', timing: 'spin' },
-  insurance: { name: '보험 카드', desc: '다음 아찔 칸의 손해를 1번 막아줌 (자동)', timing: 'passive' },
+  insurance: { name: '보험 카드', desc: '다음 유령 칸의 손해를 1번 막아줌 (자동)', timing: 'passive' },
   bonus: { name: '보너스 카드', desc: '즉시 월급(용돈) 1회분을 받음', timing: 'now' },
   study: { name: '학습 코스 카드', desc: '지력 +10', timing: 'now' },
   gym: { name: '헬스 회원권 카드', desc: '체력 +10', timing: 'now' },
@@ -305,30 +308,57 @@ export const EVENTS = {
   ],
 };
 
+// 물방울 칸(아슬아슬): 문구 표시 후 능력치 변동 룰렛 (HIYARI_SPIN)
 export const HIYARI = {
   baby: [
-    { t: '감기에 걸렸다. 콜록콜록.', e: { phy: -3 } },
-    { t: '장난감을 삼킬 뻔했다!', e: { fortune: -1 } },
+    { t: '아슬아슬! 소파에서 떨어질 뻔했다.' },
+    { t: '아슬아슬! 장난감을 삼킬 뻔했다!' },
   ],
   kid: [
-    { t: '계단에서 넘어져 다리를 다쳤다.', e: { phy: -5 } },
-    { t: '시험지를 잃어버렸다...', e: { int: -4 } },
-    { t: '용돈을 잃어버렸다.', e: { money: -50 } },
-    { t: '친구와 크게 싸웠다.', e: { sen: -3, fortune: -1 } },
-    { t: '핸드폰 액정이 깨졌다.', e: { money: -80 } },
+    { t: '아슬아슬! 계단에서 미끄러질 뻔했다.' },
+    { t: '아슬아슬! 숙제를 두고 올 뻔했다.' },
+    { t: '아슬아슬! 지각할 뻔했다.' },
+    { t: '아슬아슬! 자전거와 부딪힐 뻔했다.' },
   ],
   adult: [
-    { t: '교통사고! 수리비가 들었다.', e: { money: -1500 } },
-    { t: '보이스피싱에 당했다...', e: { money: -2000 } },
-    { t: '허리를 삐끗했다.', e: { phy: -6, money: -300 } },
-    { t: '투자한 코인이 폭락했다.', e: { money: -3000 } },
-    { t: '집에 물이 샜다.', e: { money: -1000 } },
-    { t: '세금을 깜빡해서 가산세!', e: { money: -1200 } },
+    { t: '아슬아슬! 중요한 회의를 잊을 뻔했다.' },
+    { t: '아슬아슬! 차 사고가 날 뻔했다.' },
+    { t: '아슬아슬! 마감 직전에 서류를 냈다.' },
+    { t: '아슬아슬! 지갑을 잃어버릴 뻔했다.' },
   ],
   final: [
-    { t: '입원했다. 병원비가 들었다.', e: { money: -2500 } },
-    { t: '사기꾼에게 속아 건강식품을 샀다.', e: { money: -1500 } },
-    { t: '틀니를 잃어버렸다.', e: { money: -300 } },
+    { t: '아슬아슬! 빙판길에서 넘어질 뻔했다.' },
+    { t: '아슬아슬! 약 먹는 걸 잊을 뻔했다.' },
+  ],
+};
+// 물방울 칸 능력치 변동 룰렛: 룰렛 값(1~10) → 무작위 능력치 1개 증감
+export const HIYARI_SPIN = [-12, -10, -8, -6, -5, -4, -3, -2, 3, 6];
+
+// 유령 칸(대위기): 표 효과 + 운세 -1 (보험 카드로 1회 무효)
+export const GHOST = {
+  baby: [
+    { t: '으앙! 심한 감기에 걸렸다.', e: { phy: -6 } },
+    { t: '무서운 꿈을 꾸고 밤새 울었다.', e: { sen: -4, int: -2 } },
+  ],
+  kid: [
+    { t: '계단에서 굴러 다리가 부러졌다.', e: { phy: -10 } },
+    { t: '시험지를 통째로 잃어버렸다...', e: { int: -8 } },
+    { t: '모아둔 용돈을 몽땅 잃어버렸다.', e: { money: -150 } },
+    { t: '친구와 크게 싸워 절교했다.', e: { sen: -6 } },
+    { t: '엄마 스마트폰을 떨어뜨려 박살냈다.', e: { money: -200 } },
+  ],
+  adult: [
+    { t: '대형 교통사고! 수리비와 병원비가...', e: { money: -3000 } },
+    { t: '보이스피싱에 당했다...', e: { money: -4000 } },
+    { t: '허리 디스크로 입원했다.', e: { phy: -10, money: -800 } },
+    { t: '투자한 코인이 대폭락했다.', e: { money: -6000 } },
+    { t: '집이 물에 잠겼다.', e: { money: -2000 } },
+    { t: '세금 폭탄을 맞았다!', e: { money: -2500 } },
+  ],
+  final: [
+    { t: '큰 병으로 입원했다.', e: { money: -5000 } },
+    { t: '사기꾼에게 노후 자금을 뜯겼다.', e: { money: -3000 } },
+    { t: '틀니를 잃어버렸다.', e: { money: -800 } },
   ],
 };
 
@@ -376,17 +406,20 @@ export const CHOICES = {
   ],
 };
 
-export const LUCKY = {
+// 별 칸 Lv3 (빛나는 칸): 호화 이벤트
+export const STAR3 = {
   kid: [
-    { t: '길에서 반짝이는 것을 주웠다!', e: { treasure: 1 } },
-    { t: '뽑기에서 1등 당첨!', e: { money: 100 } },
-    { t: '행운이 찾아왔다!', e: { fortune: 1, card: 1 } },
+    { t: '신동으로 신문에 소개됐다!', e: { int: 10, sen: 5, fortune: 1 } },
+    { t: '길에서 반짝이는 보물을 주웠다!', e: { treasure: 1, money: 100 } },
+    { t: '네잎클로버 들판을 발견했다!', e: { fortune: 2, card: 1 } },
+    { t: '전국 대회에서 우승했다!', e: { phy: 10, sen: 5, money: 100 } },
   ],
   adult: [
-    { t: '숨겨진 보물을 발견했다!', e: { treasure: 1 } },
+    { t: '숨겨진 보물을 발견했다!', e: { treasure: 1, money: 1000 } },
     { t: '복권 1등 당첨!!', e: { money: 5000 } },
     { t: '먼 친척의 유산을 받았다.', e: { money: 3000, treasure: 1 } },
-    { t: '행운의 여신이 미소지었다.', e: { fortune: 1, card: 1 } },
+    { t: '행운의 여신이 미소지었다.', e: { fortune: 2, card: 1 } },
+    { t: '특별 보너스가 나왔다!', e: { money: 'salary2' } },
   ],
 };
 

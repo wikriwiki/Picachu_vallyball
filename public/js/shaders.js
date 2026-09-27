@@ -166,6 +166,58 @@ export function toonMaterial(color = 0xffffff, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// 도로 (아스팔트 + 점선 중앙선 + 가장자리 흰선), uv.x 는 길이(월드 단위), uv.y 는 폭 0~1
+// ---------------------------------------------------------------------------
+export function roadMaterial() {
+  const m = new THREE.ShaderMaterial({
+    uniforms: toonUniforms({ uColor: { value: new THREE.Color(0x6b6f7a) } }),
+    lights: true,
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <shadowmap_pars_vertex>
+      varying vec3 vNormalV;
+      varying vec3 vViewPos;
+      varying vec2 vUv;
+      void main() {
+        #include <beginnormal_vertex>
+        #include <defaultnormal_vertex>
+        #include <begin_vertex>
+        #include <project_vertex>
+        #include <worldpos_vertex>
+        #include <shadowmap_vertex>
+        vNormalV = normalize(transformedNormal);
+        vViewPos = -mvPosition.xyz;
+        vUv = uv;
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <packing>
+      #include <lights_pars_begin>
+      #include <shadowmap_pars_fragment>
+      uniform vec3 uColor;
+      varying vec3 vNormalV;
+      varying vec3 vViewPos;
+      varying vec2 vUv;
+      ${TOON_LIGHT_FN}
+      void main() {
+        vec3 base = uColor;
+        float dash = step(0.5, fract(vUv.x / 3.0)) * (1.0 - step(0.035, abs(vUv.y - 0.5)));
+        float edge = step(0.9, abs(vUv.y - 0.5) * 2.0) * (1.0 - step(0.96, abs(vUv.y - 0.5) * 2.0));
+        base = mix(base, vec3(0.97), max(dash, edge));
+        vec3 col = toonShade(base, normalize(vNormalV), normalize(vViewPos), 1.0);
+        col = applyFog(col, length(vViewPos));
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+  m.uniforms.uRimStrength.value = 0.05;
+  m.uniforms.uSpecular.value = 0;
+  sharedMaterials.add(m);
+  return m;
+}
+
+// ---------------------------------------------------------------------------
 // 아웃라인 (뒤집힌 헐 방식, 화면 공간 두께 보정)
 // ---------------------------------------------------------------------------
 export function outlineMaterial(color = 0x2a2238, thickness = 0.035) {
@@ -207,7 +259,7 @@ export function tileMaterial(atlas, atlasGrid) {
       uGrid: { value: atlasGrid },
       uActive: { value: -1 },
       uTime: { value: 0 },
-      uTileHalf: { value: new THREE.Vector2(1.35, 1.35) },
+      uTileHalf: { value: new THREE.Vector2(1.3, 1.3) },
       uTopY: { value: 0.5 },
     }),
     lights: true,
@@ -217,6 +269,8 @@ export function tileMaterial(atlas, atlasGrid) {
       attribute float aIcon;
       attribute float aIndex;
       attribute vec3 aColor;
+      attribute float aGlow;
+      varying float vGlow;
       uniform float uActive;
       uniform float uTime;
       varying vec3 vNormalV;
@@ -246,6 +300,7 @@ export function tileMaterial(atlas, atlasGrid) {
         vec2 wOff = (mat3(instanceMatrix) * position).xz;
         vIconP = wOff / length(instanceMatrix[0].xyz);
         vTileColor = aColor;
+        vGlow = aGlow;
       }`,
     fragmentShader: /* glsl */`
       #include <common>
@@ -265,13 +320,26 @@ export function tileMaterial(atlas, atlasGrid) {
       varying float vActive;
       varying vec3 vTileColor;
       varying vec2 vIconP;
+      varying float vGlow;
       ${TOON_LIGHT_FN}
+      float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
       void main() {
         vec3 base = vTileColor;
         vec3 N = normalize(vNormalV);
         vec3 V = normalize(vViewPos);
         float emis = 0.0;
+        // 텍스처는 분기 밖에서 샘플링 (분기 안 샘플링은 밉맵 미분값이 깨져 노이즈 발생)
+        vec2 iuv = vec2(-vIconP.x, vIconP.y) / (uTileHalf * 1.55) * 0.5 + 0.5;
+        float iconMask = step(0.0, iuv.x) * step(iuv.x, 1.0) * step(0.0, iuv.y) * step(iuv.y, 1.0);
+        vec2 cuv = clamp(iuv, 0.01, 0.99);
+        // varying 보간 오차로 mod() 결과가 칸 경계에서 튀지 않도록 정수로 반올림 후 계산
+        float idx = floor(vIcon + 0.5);
+        float cy = floor((idx + 0.5) / uGrid.x);
+        float cx = idx - cy * uGrid.x;
+        vec2 auv = (vec2(cx, cy) + vec2(cuv.x, 1.0 - cuv.y)) / uGrid;
+        auv.y = 1.0 - auv.y;
+        vec4 iconSample = texture2D(uAtlas, auv);
         if (vObjN.y > 0.5) {
           vec2 p = vLocal.xz;
           float d = sdRoundBox(p, uTileHalf, 0.45);
@@ -279,22 +347,24 @@ export function tileMaterial(atlas, atlasGrid) {
           float border = smoothstep(-0.26, -0.2, d);
           vec3 inner = base * (1.0 + 0.18 * smoothstep(0.4, -1.2, p.y + p.x * 0.3));
           vec3 col = mix(inner, vec3(1.0), border);
-          // 아이콘
-          vec2 uv = vec2(-vIconP.x, vIconP.y) / (uTileHalf * 1.55) * 0.5 + 0.5;
-          if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
-            float cx = mod(vIcon, uGrid.x);
-            float cy = floor(vIcon / uGrid.x);
-            vec2 auv = (vec2(cx, cy) + vec2(uv.x, 1.0 - uv.y)) / uGrid;
-            auv.y = 1.0 - auv.y;
-            vec4 ic = texture2D(uAtlas, auv);
-            col = mix(col, ic.rgb, ic.a);
-          }
+          // 아이콘 (분기 밖에서 샘플링한 값 사용)
+          col = mix(col, iconSample.rgb, iconSample.a * iconMask);
           float gloss = smoothstep(0.08, 0.0, abs(p.x + p.y * 0.6 - 0.9)) * 0.25;
           col += gloss;
+          // 별 칸 Lv3: 빛 줄기가 훑고 지나가는 반짝임 + 트윙클 + 발광
+          if (vGlow > 0.5) {
+            float sweep = fract(uTime * 0.45);
+            float band = smoothstep(0.22, 0.0, abs((vIconP.x + vIconP.y) * 0.25 + 0.5 - sweep * 1.6 + 0.3));
+            vec2 cell = floor(vIconP * 3.0);
+            float tw = step(0.8, h21(cell)) * pow(max(0.0, sin(uTime * 4.0 + h21(cell + 7.0) * 30.0)), 12.0);
+            col += vec3(1.0, 0.95, 0.7) * (band * 0.8 + tw * 0.9);
+            emis += 0.35 + 0.15 * sin(uTime * 3.0);
+          }
           base = col;
-          emis = vActive * (0.25 + 0.2 * sin(uTime * 6.0));
+          emis += vActive * (0.25 + 0.2 * sin(uTime * 6.0));
         } else {
           base *= 0.72;
+          emis += vGlow * (0.25 + 0.15 * sin(uTime * 3.0));
         }
         vec3 col = toonShade(base, N, V, 1.0) + base * emis + vec3(1.0, 0.95, 0.6) * emis * 0.4;
         col = applyFog(col, length(vViewPos));
@@ -478,55 +548,55 @@ export function rouletteMaterial(numbersTex) {
       uniform sampler2D uNumbers;
       uniform float uAngle, uBlur, uHighlight, uTime;
       varying vec2 vUv;
+      vec2 gdx, gdy; // 분기 밖에서 구한 텍스처 미분값
       varying vec3 vN;
       varying vec3 vV;
       const float TAU = 6.28318530718;
+      // 원작 룰렛 색 (1 노랑 → 10 연두, docs/ADR.md §12.4)
       vec3 segColor(float i) {
-        if (i < 0.5) return vec3(0.98, 0.33, 0.35);
-        if (i < 1.5) return vec3(1.0, 0.62, 0.2);
-        if (i < 2.5) return vec3(1.0, 0.85, 0.2);
-        if (i < 3.5) return vec3(0.45, 0.85, 0.35);
-        if (i < 4.5) return vec3(0.2, 0.75, 0.6);
-        if (i < 5.5) return vec3(0.25, 0.65, 0.98);
-        if (i < 6.5) return vec3(0.35, 0.45, 0.95);
-        if (i < 7.5) return vec3(0.62, 0.42, 0.95);
-        if (i < 8.5) return vec3(0.95, 0.45, 0.8);
-        return vec3(0.98, 0.55, 0.62);
+        if (i < 0.5) return vec3(0.97, 0.78, 0.0);
+        if (i < 1.5) return vec3(0.95, 0.57, 0.0);
+        if (i < 2.5) return vec3(0.91, 0.2, 0.17);
+        if (i < 3.5) return vec3(0.91, 0.2, 0.48);
+        if (i < 4.5) return vec3(0.7, 0.12, 0.39);
+        if (i < 5.5) return vec3(0.17, 0.18, 0.49);
+        if (i < 6.5) return vec3(0.12, 0.37, 0.75);
+        if (i < 7.5) return vec3(0.25, 0.71, 0.92);
+        if (i < 8.5) return vec3(0.12, 0.65, 0.35);
+        return vec3(0.55, 0.78, 0.25);
       }
       vec3 sampleDisc(vec2 p) {
         float r = length(p);
         float a = atan(p.y, p.x);
         float t = fract(a / TAU + 1.0);
         float seg = floor(t * 10.0);
-        vec3 col = segColor(seg);
-        // 세그먼트 경계선
-        float edge = abs(fract(t * 10.0) - 0.5);
-        col = mix(vec3(1.0), col, smoothstep(0.5, 0.47, edge));
-        // 하이라이트 칸
-        if (abs(seg - uHighlight) < 0.5) col = mix(col, vec3(1.0), 0.25 + 0.25 * sin(uTime * 10.0));
-        // 숫자 (별도 텍스처, 회전 좌표 그대로 사용)
-        vec4 num = texture2D(uNumbers, p * 0.5 + 0.5);
-        col = mix(col, num.rgb, num.a);
-        // 방사형 음영
-        col *= mix(1.08, 0.86, smoothstep(0.2, 1.0, r));
+        vec3 col;
+        if (r > 0.55) {
+          col = segColor(seg);
+          if (abs(seg - uHighlight) < 0.5) col = mix(col, vec3(1.0), 0.2 + 0.2 * sin(uTime * 10.0));
+          vec4 num = textureGrad(uNumbers, p * 0.5 + 0.5, gdx, gdy);
+          col = mix(col, num.rgb, num.a);
+          col *= mix(1.06, 0.92, smoothstep(0.6, 0.97, r));
+        } else {
+          // 안쪽 흰 원판 + 칸마다 어두운 바큇살
+          col = vec3(0.96, 0.96, 0.97);
+          float mid = abs(fract(t * 10.0) - 0.5);
+          float spoke = smoothstep(0.06, 0.03, mid) * smoothstep(0.26, 0.3, r) * smoothstep(0.52, 0.48, r);
+          col = mix(col, segColor(seg) * 0.35, spoke);
+        }
         return col;
       }
       void main() {
         vec2 p = vUv * 2.0 - 1.0;
+        gdx = dFdx(vUv);
+        gdy = dFdy(vUv);
         float r = length(p);
         if (r > 1.0) discard;
         vec3 col;
-        if (r > 0.9) {
-          // 금색 림 + 페그
-          float a = atan(p.y, p.x);
-          float peg = smoothstep(0.035, 0.02, length(vec2(fract(a / TAU * 10.0 + 0.5) - 0.5, (r - 0.95) * 1.2)));
-          vec3 gold = mix(vec3(0.75, 0.55, 0.15), vec3(1.0, 0.9, 0.5), 0.5 + 0.5 * sin(a * 3.0 + uAngle * 2.0));
-          col = mix(gold, vec3(1.0), peg);
+        if (r > 0.97) {
+          col = vec3(0.98);
         } else if (r < 0.2) {
-          // 금속 허브
-          float l = 0.6 + 0.4 * (1.0 - r / 0.2);
-          col = vec3(0.95, 0.95, 1.0) * l;
-          col = mix(col, vec3(1.0, 0.85, 0.3), smoothstep(0.17, 0.2, r));
+          col = vec3(0.92);
         } else {
           // 각속도 모션 블러: 원주 방향으로 여러 번 샘플
           col = vec3(0.0);

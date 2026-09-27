@@ -3,7 +3,8 @@
 import {
   ERAS, ADULT_ERA, FINAL_ERA, JOBS, jobById, meetsReq, gradeIndex, CLUBS, CARDS, CARD_POOL, HAND_MAX,
   TREASURES, HOUSES, NOTE_UNIT, NOTE_REPAY, KID_GIFT, GOAL_BONUS, AWARD_BONUS, WEDDING_GIFT, BIRTH_GIFT,
-  SPOUSE_NAMES, KID_NAMES, EVENTS, HIYARI, HIYARI_SPIN, GHOST, LOVE, CHOICES, STAR3, FORTUNES, FORTUNE_START, STAT_NAMES, STAT_MAX,
+  KID_NAMES, PARTNERS, STAR_WEIGHTS, STAR_GAIN, DATE_BASE, PROPOSE_AT, PERSONALITY_NAMES, PERSONALITY_CARD,
+  SUBMAPS, ROUTE_NAMES, ROUTE_DESC, EVENTS, HIYARI, HIYARI_SPIN, GHOST, LOVE, CHOICES, STAR3, FORTUNES, FORTUNE_START, STAT_NAMES, STAT_MAX,
 } from './data.js';
 import { BOARD } from './board.js';
 
@@ -64,8 +65,9 @@ export function createGame({ players, mode = 'full', seed = Date.now() }) {
       fortune: FORTUNE_START,
       job: null,
       rank: 0,
-      love: 0,
+      partner: null, // { id, affinity } (docs/ADR.md §6.4)
       spouse: null,
+      subReturn: null, // 서브맵 여행 중이면 돌아올 본 맵 칸
       kids: [],
       cards: [],
       treasures: [],
@@ -78,6 +80,7 @@ export function createGame({ players, mode = 'full', seed = Date.now() }) {
       finished: false,
       finishOrder: null,
     })),
+    partners: [],
     pending: null,
     queue: [],
     log: [],
@@ -85,6 +88,13 @@ export function createGame({ players, mode = 'full', seed = Date.now() }) {
     result: null,
     seq: 0,
   };
+  // 연애 상대 후보: ★ 등급은 게임마다 무작위 (docs/ADR.md §6.4)
+  s.partners = PARTNERS.map((c) => {
+    let r = rnd(s) * STAR_WEIGHTS.reduce((a, b) => a + b, 0);
+    let stars = 1;
+    for (let k = 0; k < STAR_WEIGHTS.length; k++) { r -= STAR_WEIGHTS[k]; if (r < 0) { stars = k + 1; break; } }
+    return { id: c.id, name: c.name, job: c.job, personality: c.personality, color: c.color, stars, takenBy: null };
+  });
   const ev = [];
   if (mode === 'adult') {
     for (const p of s.players) {
@@ -173,10 +183,7 @@ function applyEffects(s, p, e, ev) {
   }
   for (const k of ['int', 'phy', 'sen']) if (e[k]) addStat(s, p, k, e[k], ev);
   if (e.fortune) addFortune(s, p, e.fortune, ev);
-  if (e.love) {
-    p.love = Math.max(0, p.love + e.love);
-    ev.push({ t: 'love', pid: p.id, delta: e.love, value: p.love });
-  }
+  if (e.love && p.partner && !p.spouse) addAffinity(s, p, e.love * 10, ev);
   if (e.card) for (let i = 0; i < e.card; i++) gainCard(s, p, ev);
   if (e.treasure) for (let i = 0; i < e.treasure; i++) gainTreasure(s, p, ev);
   if (e.gamble) {
@@ -243,6 +250,7 @@ function nextEra(s, ev) {
   for (const p of s.players) {
     p.tile = start;
     p.doneEra = false;
+    p.subReturn = null;
     ev.push({ t: 'warp', pid: p.id, tile: start });
   }
   queueEraStart(s);
@@ -255,6 +263,7 @@ function queueEraStart(s) {
   const id = eraKey(s.era);
   for (const p of s.players) {
     if (id === 'middle' || id === 'high') s.queue.push({ kind: 'club', playerId: p.id });
+    if (id === 'high' && !p.partner) s.queue.push({ kind: 'crush', playerId: p.id });
     if (id === 'adult1') {
       s.queue.push({ kind: 'career', playerId: p.id });
       s.queue.push({ kind: 'job', playerId: p.id });
@@ -298,6 +307,17 @@ function makeQueued(s, q) {
       }),
     };
   }
+  if (q.kind === 'crush') {
+    const pool = freePartners(s, (c) => c.stars <= 3);
+    const picks = [];
+    while (picks.length < 3 && pool.length) picks.push(pool.splice(rint(s, pool.length), 1)[0]);
+    return {
+      type: 'choice', kind: 'crush', playerId: p.id,
+      title: '고등학생이 되었다! 관심 있는 사람을 고르세요',
+      options: picks.map((c) => ({ label: `${'★'.repeat(c.stars)} ${c.name} (${c.job})`, desc: `${PERSONALITY_NAMES[c.personality]} — ${partnerHint(p, c)}`, partnerId: c.id }))
+        .concat([{ label: '지금은 관심 없음', desc: '하트 칸에서 새로운 만남이 생길 수 있다' }]),
+    };
+  }
   throw new Error('unknown queue kind ' + q.kind);
 }
 
@@ -330,13 +350,31 @@ function payday(s, p, ev) {
   addMoney(s, p, salaryOf(p), '월급', ev);
 }
 
-function doMove(s, p, steps, ev) {
-  const endIdx = BOARD.eraEnd[s.era];
+// 그래프 이동 (docs/ADR.md §6.11): 분기점에서는 길 선택 후 남은 칸을 이어서 이동
+function doMove(s, p, steps, ev, forced = null) {
   let seg = [];
   let pos = p.tile;
   for (let k = 0; k < steps; k++) {
-    if (pos >= endIdx) break;
-    pos += 1;
+    const cur = BOARD.tiles[pos];
+    if (!cur.next.length || cur.type === 'return') break;
+    let nx;
+    if (k === 0 && forced != null) nx = forced;
+    else if (cur.next.length > 1) {
+      if (seg.length) ev.push({ t: 'move', pid: p.id, path: seg });
+      p.tile = pos;
+      const br = BOARD.branches.find((b) => b.junction === pos);
+      s.pending = {
+        type: 'choice', kind: 'route', playerId: p.id, remaining: steps - k,
+        title: `갈림길! 어느 길로 갈까요? (남은 ${steps - k}칸)`,
+        options: cur.next.map((n, idx) => {
+          const route = br ? br.routes[idx] : BOARD.tiles[n].route;
+          return { label: ROUTE_NAMES[route] || route, desc: ROUTE_DESC[route] || '', next: n, route };
+        }),
+      };
+      ev.push({ t: 'junction', pid: p.id, tile: pos, options: cur.next });
+      return;
+    } else nx = cur.next[0];
+    pos = nx;
     seg.push(pos);
     const t = BOARD.tiles[pos];
     if (t.type === 'payday') {
@@ -346,9 +384,8 @@ function doMove(s, p, steps, ev) {
       msg(s, ev, p, s.era < ADULT_ERA ? '용돈날!' : s.era === FINAL_ERA ? '연금날!' : '월급날!', 'payday');
       payday(s, p, ev);
     }
-    if (t.type === 'stop' && k < steps - 1) {
-      break; // STOP 칸은 반드시 멈춤
-    }
+    if (t.type === 'stop' && k < steps - 1) break; // STOP 칸은 반드시 멈춤
+    if (t.type === 'return') break; // 귀환 칸은 지나칠 수 없음
   }
   p.tile = pos;
   if (seg.length) ev.push({ t: 'move', pid: p.id, path: seg });
@@ -382,14 +419,103 @@ function resolveTile(s, p, ev) {
     case 'payday':
       break; // doMove 에서 처리
     case 'love': {
-      let list;
-      if (g === 'baby' || g === 'kid') list = LOVE.kid;
-      else if (g === 'teen') list = LOVE.teen;
-      else list = p.spouse ? LOVE.married : LOVE.adult;
-      const e = choose(s, list);
-      msg(s, ev, p, e.t, 'love');
-      applyEffects(s, p, e.e, ev);
-      if (s.era >= ADULT_ERA && !p.spouse && p.love >= 4) marry(s, p, ev);
+      // 하트 칸 (docs/ADR.md §6.4)
+      if (p.spouse) {
+        const e = choose(s, LOVE.married);
+        msg(s, ev, p, e.t, 'love');
+        applyEffects(s, p, e.e, ev);
+      } else if (!p.partner) {
+        const pool = freePartners(s, (c) => c.stars <= 3);
+        if (pool.length) {
+          const c = choose(s, pool);
+          setPartner(s, p, c, 10, ev);
+          msg(s, ev, p, `💘 새로운 만남! ${'★'.repeat(c.stars)} ${c.name}(${c.job})와(과) 알게 되었다.`, 'love');
+        }
+      } else {
+        const c = partnerOf(s, p);
+        const gain = Math.round(DATE_BASE * (c.personality === topStat(p) ? 1.5 : 1) * STAR_GAIN[c.stars - 1]);
+        msg(s, ev, p, `💗 ${c.name}와(과) 데이트! 호감도 +${gain}`, 'love');
+        if (s.era >= ADULT_ERA) addMoney(s, p, -200, '데이트 비용', ev);
+        addAffinity(s, p, gain, ev);
+        if (s.era >= ADULT_ERA && p.partner.affinity >= PROPOSE_AT) {
+          s.pending = {
+            type: 'choice', kind: 'propose', playerId: p.id,
+            title: `${c.name}에게 프러포즈할까요? (호감도 ${p.partner.affinity} → ${proposeNeed(p)} 이상이면 성공)`,
+            options: [{ label: '💍 프러포즈한다', desc: '실패하면 호감도 −20' }, { label: '아직 기다린다', desc: '호감도를 더 올린다' }],
+          };
+        }
+      }
+      break;
+    }
+    case 'destiny': {
+      // 운명의 하트 칸 (docs/ADR.md §6.5.1)
+      if (p.spouse) { msg(s, ev, p, '🌈 무지개 하트! 부부의 사랑이 더 깊어졌다.', 'love'); addFortune(s, p, 1, ev); break; }
+      let pool = freePartners(s, (c) => c.stars >= 4 && (!p.partner || c.id !== p.partner.id));
+      if (!pool.length) pool = freePartners(s, (c) => c.stars === 3 && (!p.partner || c.id !== p.partner.id));
+      if (!pool.length) break;
+      const c = choose(s, pool);
+      msg(s, ev, p, `🌈 운명의 만남! ${'★'.repeat(c.stars)} ${c.name}(${c.job})`, 'love');
+      if (!p.partner) { setPartner(s, p, c, 20, ev); break; }
+      const cur = partnerOf(s, p);
+      s.pending = {
+        type: 'choice', kind: 'destiny', playerId: p.id, candidate: c.id,
+        title: `${c.name}에게 마음이 흔들린다... 상대를 바꿀까요?`,
+        options: [
+          { label: `${c.name}(${'★'.repeat(c.stars)})로 바꾼다`, desc: '호감도 20부터 새로 시작' },
+          { label: `${cur.name}(${'★'.repeat(cur.stars)})를 지킨다`, desc: '현재 상대 호감도 +10' },
+        ],
+      };
+      break;
+    }
+    case 'travel': {
+      // 여행 칸 (docs/ADR.md §6.12)
+      const sm = SUBMAPS[t.sub];
+      s.pending = {
+        type: 'choice', kind: 'travel', playerId: p.id, sub: t.sub,
+        title: `여행 칸! ${sm.name}(으)로 여행을 떠날까요?`,
+        options: [{ label: `✈️ ${sm.name}(으)로 떠난다`, desc: `돌아올 때는 ${TRAVEL_SHORTCUT_TEXT}` }, { label: '가지 않는다', desc: '그대로 진행' }],
+      };
+      break;
+    }
+    case 'substart':
+      break;
+    case 'rest':
+      msg(s, ev, p, '🌾 시골에서 푹 쉬었다.', 'lucky');
+      applyEffects(s, p, { phy: 5, fortune: 1 }, ev);
+      break;
+    case 'farm':
+      msg(s, ev, p, '🥕 밭에서 수확했다!', 'payday');
+      addMoney(s, p, 500, '수확', ev);
+      break;
+    case 'bet':
+      s.pending = {
+        type: 'choice', kind: 'bet', playerId: p.id, title: '🎰 베팅! 룰렛 6 이상이면 건 돈의 3배',
+        options: [{ label: '1000만 건다', amount: 1000 }, { label: '3000만 건다', amount: 3000 }, { label: '그만둔다', amount: 0 }],
+      };
+      break;
+    case 'dig':
+      if (rnd(s) < 0.5) { msg(s, ev, p, '⛏️ 보물을 캐냈다!', 'lucky'); gainTreasure(s, p, ev); }
+      else { msg(s, ev, p, '⛏️ 허탕... 삽값만 들었다.', 'bad'); addMoney(s, p, -200, '허탕', ev); }
+      break;
+    case 'jackpot':
+      s.pending = { type: 'spin', playerId: p.id, purpose: 'jackpot', title: '💰 잭팟! 룰렛 값 × 1000만' };
+      break;
+    case 'pray':
+      msg(s, ev, p, '⛩️ 신에게 봉납하고 기도했다.', 'event');
+      addMoney(s, p, -300, '봉납', ev);
+      s.pending = { type: 'spin', playerId: p.id, purpose: 'pray', title: '🙏 기도 룰렛! 8 이상이면 큰 축복' };
+      break;
+    case 'omikuji':
+      s.pending = { type: 'spin', playerId: p.id, purpose: 'omikuji', title: '🎴 운세 뽑기! 룰렛으로 운세가 새로 정해진다' };
+      break;
+    case 'return': {
+      const back = p.subReturn;
+      p.subReturn = null;
+      if (back != null) {
+        msg(s, ev, p, '✈️ 여행을 마치고 돌아왔다! (지름길)', 'lucky');
+        p.tile = back;
+        ev.push({ t: 'warp', pid: p.id, tile: back, fly: true });
+      }
       break;
     }
     case 'hiyari': {
@@ -466,14 +592,23 @@ function resolveTile(s, p, ev) {
     }
     case 'stop':
       if (t.stop === 'marriage') {
+        // 결혼 STOP (docs/ADR.md §7)
         if (p.spouse) {
           msg(s, ev, p, '결혼식장 앞. 이미 행복한 가정이 있다!', 'love');
           addFortune(s, p, 1, ev);
-        } else if (p.love >= 2) {
-          marry(s, p, ev);
         } else {
-          const need = Math.max(3, 8 - p.love * 2);
-          s.pending = { type: 'spin', playerId: p.id, purpose: 'marriage', need, title: `결혼 STOP! ${need} 이상이면 결혼!` };
+          if (!p.partner) {
+            const pool = freePartners(s, (c) => c.stars <= 2);
+            if (pool.length) {
+              const c = choose(s, pool);
+              setPartner(s, p, c, 30, ev);
+              msg(s, ev, p, `💐 즉석 소개팅! ${'★'.repeat(c.stars)} ${c.name}(${c.job})와(과) 만났다.`, 'love');
+            }
+          }
+          if (p.partner) {
+            const c = partnerOf(s, p);
+            s.pending = { type: 'spin', playerId: p.id, purpose: 'propose', need: proposeNeed(p), title: `💍 ${c.name}에게 프러포즈! ${proposeNeed(p)} 이상이면 결혼` };
+          }
         }
       } else if (t.stop === 'house') {
         s.pending = {
@@ -539,12 +674,40 @@ function collectFromOthers(s, p, amount, reason, ev) {
   if (total) addMoney(s, p, total, reason, ev);
 }
 
-function marry(s, p, ev) {
-  p.spouse = choose(s, SPOUSE_NAMES);
-  ev.push({ t: 'marry', pid: p.id, spouse: p.spouse });
-  msg(s, ev, p, `「${p.spouse}」와(과) 결혼했다! 모두에게서 축의금을 받는다.`, 'love');
-  collectFromOthers(s, p, WEDDING_GIFT, '축의금', ev);
+// ---------- 연애 (docs/ADR.md §6.4~6.5) ----------
+function freePartners(s, pred = () => true) { return s.partners.filter((c) => !c.takenBy && pred(c)); }
+function partnerOf(s, p) { return p.partner ? s.partners.find((c) => c.id === p.partner.id) : null; }
+function topStat(p) { return ['int', 'phy', 'sen'].reduce((a, b) => (p.stats[b] > p.stats[a] ? b : a), 'int'); }
+function partnerHint(p, c) { return c.personality === topStat(p) ? '나와 성격이 잘 맞는다!' : '호감도가 보통으로 오른다'; }
+function proposeNeed(p) { return Math.max(2, Math.min(10, 11 - Math.floor(p.partner.affinity / 10))); }
+function setPartner(s, p, c, affinity, ev) {
+  if (p.partner) { const old = partnerOf(s, p); if (old) old.takenBy = null; }
+  c.takenBy = p.id;
+  p.partner = { id: c.id, affinity };
+  ev.push({ t: 'partner', pid: p.id, partner: c.id, name: c.name, stars: c.stars, affinity });
 }
+function addAffinity(s, p, d, ev) {
+  if (!p.partner) return;
+  const before = p.partner.affinity;
+  p.partner.affinity = Math.max(0, Math.min(100, before + d));
+  ev.push({ t: 'affinity', pid: p.id, delta: p.partner.affinity - before, value: p.partner.affinity });
+}
+
+function marry(s, p, ev) {
+  const c = partnerOf(s, p);
+  p.spouse = c.name;
+  ev.push({ t: 'marry', pid: p.id, spouse: p.spouse, partner: c.id });
+  msg(s, ev, p, `💒 ${c.name}와(과) 결혼했다! 모두에게서 축의금을 받는다.`, 'love');
+  collectFromOthers(s, p, WEDDING_GIFT, '축의금', ev);
+  addMoney(s, p, c.stars * 1000, `${c.name}의 지참금`, ev);
+  const card = c.stars >= 4 ? 'rankup' : PERSONALITY_CARD[c.personality];
+  if (p.cards.length < HAND_MAX) {
+    p.cards.push(card);
+    ev.push({ t: 'card', pid: p.id, card, gained: true });
+  }
+}
+
+const TRAVEL_SHORTCUT_TEXT = '본 맵의 6칸 앞(지름길)으로 돌아온다';
 
 // ---------- 룰렛 ----------
 export function spinValue(s, power) {
@@ -587,9 +750,31 @@ export function applyAction(s, playerId, action) {
       const d = HIYARI_SPIN[value - 1];
       msg(s, ev, p, d >= 0 ? `위기를 기회로! ${STAT_NAMES[pend.stat]} +${d}` : `${STAT_NAMES[pend.stat]} ${d}...`, d >= 0 ? 'lucky' : 'bad');
       addStat(s, p, pend.stat, d, ev);
-    } else if (pend.purpose === 'marriage') {
+    } else if (pend.purpose === 'propose') {
       if (value >= pend.need) marry(s, p, ev);
-      else { msg(s, ev, p, '이번엔 인연이 아니었다. 솔로 라이프를 즐긴다!', 'info'); addStat(s, p, 'sen', 5, ev); }
+      else { msg(s, ev, p, '프러포즈 실패... 조금 더 가까워져야 할 것 같다.', 'bad'); addAffinity(s, p, -20, ev); }
+    } else if (pend.purpose === 'bet') {
+      if (value >= 6) { msg(s, ev, p, '🎰 대박! 3배!', 'lucky'); addMoney(s, p, pend.amount * 2, '베팅 수익', ev); }
+      else { msg(s, ev, p, '🎰 꽝...', 'bad'); addMoney(s, p, -pend.amount, '베팅 손실', ev); }
+    } else if (pend.purpose === 'jackpot') {
+      msg(s, ev, p, `💰 잭팟 ${value}배!`, 'lucky');
+      addMoney(s, p, value * 1000, '잭팟', ev);
+    } else if (pend.purpose === 'pray') {
+      if (value >= 8) {
+        msg(s, ev, p, '✨ 신의 큰 축복!', 'lucky');
+        addFortune(s, p, 2, ev);
+        const job = p.job ? jobById(p.job) : null;
+        if (job && job.type === 'spin' && p.rank < job.ranks.length - 1) {
+          p.rank += 1;
+          ev.push({ t: 'job', pid: p.id, job: p.job, rank: p.rank, promoted: true });
+          msg(s, ev, p, `「${job.ranks[p.rank].name}」(으)로 랭크업!`, 'lucky');
+        }
+      } else if (value >= 4) { msg(s, ev, p, '작은 축복을 받았다.', 'lucky'); addFortune(s, p, 1, ev); }
+      else msg(s, ev, p, '아무 일도 일어나지 않았다...', 'info');
+    } else if (pend.purpose === 'omikuji') {
+      const f = value <= 2 ? 1 : value <= 5 ? 3 : value <= 8 ? 4 : value === 9 ? 5 : 6;
+      msg(s, ev, p, `🎴 운세 뽑기 결과: 「${FORTUNES[f]}」`, f >= 5 ? 'lucky' : f <= 1 ? 'bad' : 'event');
+      addFortune(s, p, f - p.fortune, ev);
     }
   } else if (action.type === 'choose') {
     if (pend.type !== 'choice') throw new Error('선택할 것이 없습니다.');
@@ -652,6 +837,46 @@ function resolveChoice(s, p, pend, idx, opt, ev) {
     case 'event':
       msg(s, ev, p, `「${opt.label}」`, 'event');
       applyEffects(s, p, opt.e, ev);
+      break;
+    case 'route':
+      msg(s, ev, p, `${opt.label}(으)로 간다!`, 'info');
+      doMove(s, p, pend.remaining, ev, opt.next);
+      break;
+    case 'crush': {
+      if (opt.partnerId) {
+        const c = s.partners.find((x) => x.id === opt.partnerId);
+        if (c.takenBy) { msg(s, ev, p, `${c.name}에게는 이미 다른 인연이...`, 'bad'); break; }
+        setPartner(s, p, c, 0, ev);
+        msg(s, ev, p, `💘 ${c.name}이(가) 신경 쓰이기 시작했다.`, 'love');
+      } else msg(s, ev, p, '지금은 공부와 동아리에 집중!', 'info');
+      break;
+    }
+    case 'propose': {
+      if (idx === 0) {
+        const c = partnerOf(s, p);
+        s.pending = { type: 'spin', playerId: p.id, purpose: 'propose', need: proposeNeed(p), title: `💍 ${c.name}에게 프러포즈! ${proposeNeed(p)} 이상이면 결혼` };
+      } else msg(s, ev, p, '조금 더 사이를 다지기로 했다.', 'info');
+      break;
+    }
+    case 'destiny': {
+      const c = s.partners.find((x) => x.id === pend.candidate);
+      if (idx === 0 && !c.takenBy) { setPartner(s, p, c, 20, ev); msg(s, ev, p, `💘 ${c.name}와(과) 새로운 사랑을 시작했다!`, 'love'); }
+      else { msg(s, ev, p, '지금의 사람을 소중히 하기로 했다.', 'love'); addAffinity(s, p, 10, ev); }
+      break;
+    }
+    case 'travel': {
+      if (idx === 0) {
+        const here = BOARD.tiles[p.tile];
+        p.subReturn = here.ret;
+        p.tile = BOARD.subStart[pend.sub];
+        msg(s, ev, p, `✈️ ${SUBMAPS[pend.sub].name}(으)로 여행을 떠났다!`, 'lucky');
+        ev.push({ t: 'warp', pid: p.id, tile: p.tile, fly: true });
+      } else msg(s, ev, p, '여행은 다음 기회에.', 'info');
+      break;
+    }
+    case 'bet':
+      if (opt.amount) s.pending = { type: 'spin', playerId: p.id, purpose: 'bet', amount: opt.amount, title: `${formatMoney(opt.amount)} 베팅! 6 이상이면 3배` };
+      else msg(s, ev, p, '베팅은 그만두었다.', 'info');
       break;
     default:
       break;
@@ -780,6 +1005,26 @@ export function cpuAction(s, rand = Math.random) {
       return { type: 'choose', index: best };
     }
     if (pend.kind === 'career') return { type: 'choose', index: p.stats.int >= 25 ? 0 : 1 };
+    // docs/ADR.md §13.1
+    if (pend.kind === 'route') {
+      const loveIdx = pend.options.findIndex((o) => o.route === 'love');
+      const wantLove = !p.spouse && rand() < (p.partner ? 0.7 : 0.5);
+      if (loveIdx >= 0) return { type: 'choose', index: wantLove ? loveIdx : 1 - loveIdx };
+      return { type: 'choose', index: Math.floor(rand() * pend.options.length) };
+    }
+    if (pend.kind === 'crush') {
+      const top = ['int', 'phy', 'sen'].reduce((a, b) => (p.stats[b] > p.stats[a] ? b : a), 'int');
+      const i = pend.options.findIndex((o) => o.partnerId && s.partners.find((c) => c.id === o.partnerId).personality === top);
+      return { type: 'choose', index: i >= 0 ? i : 0 };
+    }
+    if (pend.kind === 'propose') return { type: 'choose', index: 0 };
+    if (pend.kind === 'destiny') {
+      const cand = s.partners.find((c) => c.id === pend.candidate);
+      const cur = p.partner ? s.partners.find((c) => c.id === p.partner.id) : null;
+      return { type: 'choose', index: cur && cand.stars > cur.stars && p.partner.affinity < 50 ? 0 : 1 };
+    }
+    if (pend.kind === 'travel') return { type: 'choose', index: rand() < 0.7 ? 0 : 1 };
+    if (pend.kind === 'bet') return { type: 'choose', index: p.money >= 3000 && rand() < 0.3 ? 1 : p.money >= 1000 ? 0 : 2 };
     if (pend.kind === 'house') {
       let best = pend.options.length - 1;
       pend.options.forEach((o, i) => {

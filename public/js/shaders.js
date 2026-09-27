@@ -201,9 +201,16 @@ export function roadMaterial() {
       ${TOON_LIGHT_FN}
       void main() {
         vec3 base = uColor;
-        float dash = step(0.5, fract(vUv.x / 3.0)) * (1.0 - step(0.035, abs(vUv.y - 0.5)));
-        float edge = step(0.9, abs(vUv.y - 0.5) * 2.0) * (1.0 - step(0.96, abs(vUv.y - 0.5) * 2.0));
+        // 폭 방향: 인도(바깥 20%) | 연석 | 차도(가장자리선 + 점선 중앙선)
+        float y = abs(vUv.y - 0.5) * 2.0;
+        float dash = step(0.5, fract(vUv.x / 3.0)) * (1.0 - step(0.022, abs(vUv.y - 0.5)));
+        float edge = step(0.7, y) * (1.0 - step(0.74, y));
         base = mix(base, vec3(0.97), max(dash, edge));
+        if (y > 0.8) {
+          vec2 tile = fract(vec2(vUv.x / 0.8, (y - 0.8) / 0.2));
+          base = vec3(0.86, 0.84, 0.8) * (0.94 + 0.06 * step(0.08, tile.x));
+          base *= 1.0 - 0.25 * (1.0 - step(0.83, y));
+        }
         vec3 col = toonShade(base, normalize(vNormalV), normalize(vViewPos), 1.0);
         col = applyFog(col, length(vViewPos));
         gl_FragColor = vec4(col, 1.0);
@@ -213,6 +220,112 @@ export function roadMaterial() {
   });
   m.uniforms.uRimStrength.value = 0.05;
   m.uniforms.uSpecular.value = 0;
+  sharedMaterials.add(m);
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// 건물 셰이더: 벽면에 월드 좌표 기반 창문 격자 / 벽돌 무늬 (docs/ADR.md §12.3)
+//   opts.win: [창문 가로 간격, 세로 간격] (없으면 창문 없음), opts.brick: 벽돌 무늬
+// ---------------------------------------------------------------------------
+export function buildingMaterial(color = 0xffffff, opts = {}) {
+  const m = new THREE.ShaderMaterial({
+    uniforms: toonUniforms({
+      uWin: { value: new THREE.Vector2(...(opts.win || [0, 0])) },
+      uGlass: { value: new THREE.Color(opts.glass || 0x5aa9e6) },
+      uBrick: { value: opts.brick ? 1 : 0 },
+      uFloor0: { value: opts.floor0 ?? 0.5 },
+    }),
+    lights: true,
+    vertexColors: !!opts.vertexColors,
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <shadowmap_pars_vertex>
+      varying vec3 vNormalV;
+      varying vec3 vViewPos;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldN;
+      varying vec3 vCol;
+      void main() {
+        #include <beginnormal_vertex>
+        #include <defaultnormal_vertex>
+        #include <begin_vertex>
+        #include <project_vertex>
+        #include <worldpos_vertex>
+        #include <shadowmap_vertex>
+        vNormalV = normalize(transformedNormal);
+        vViewPos = -mvPosition.xyz;
+        vec4 wp = vec4(transformed, 1.0);
+        vec3 n = objectNormal;
+        #ifdef USE_INSTANCING
+          wp = instanceMatrix * wp;
+          n = mat3(instanceMatrix) * n;
+        #endif
+        vWorldPos = (modelMatrix * wp).xyz;
+        vWorldN = normalize(mat3(modelMatrix) * n);
+        vCol = vec3(1.0);
+        #ifdef USE_INSTANCING_COLOR
+          vCol *= instanceColor;
+        #endif
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <packing>
+      #include <lights_pars_begin>
+      #include <shadowmap_pars_fragment>
+      uniform vec3 uColor;
+      uniform vec2 uWin;
+      uniform vec3 uGlass;
+      uniform float uBrick;
+      uniform float uFloor0;
+      varying vec3 vNormalV;
+      varying vec3 vViewPos;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldN;
+      varying vec3 vCol;
+      ${TOON_LIGHT_FN}
+      float bh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main() {
+        vec3 base = uColor * vCol;
+        vec3 wn = normalize(vWorldN);
+        float emis = 0.0;
+        if (abs(wn.y) < 0.5) {
+          vec2 t = normalize(vec2(-wn.z, wn.x));
+          float u = dot(vWorldPos.xz, t);
+          float v = vWorldPos.y;
+          if (uBrick > 0.5) {
+            float row = floor(v * 4.0);
+            vec2 b = fract(vec2(u * 2.0 + 0.5 * mod(row, 2.0), v * 4.0));
+            float mortar = step(b.x, 0.06) + step(b.y, 0.1);
+            base *= mix(0.92 + 0.12 * bh(vec2(floor(u * 2.0 + 0.5 * mod(row, 2.0)), row)), 0.75, clamp(mortar, 0.0, 1.0));
+          }
+          if (uWin.x > 0.0 && v > uFloor0) {
+            vec2 c = vec2(u / uWin.x, (v - uFloor0) / uWin.y);
+            vec2 f = fract(c);
+            float w = step(0.22, f.x) * step(f.x, 0.78) * step(0.2, f.y) * step(f.y, 0.75);
+            if (w > 0.5) {
+              float fres = pow(1.0 - abs(dot(normalize(vNormalV), normalize(vViewPos))), 2.0);
+              vec3 glass = mix(uGlass * 0.8, uSkyColor, 0.35 + 0.5 * fres);
+              glass += (1.0 - smoothstep(0.0, 0.25, abs(f.x - f.y * 0.8 - 0.1))) * 0.25;
+              float lit = step(0.86, bh(floor(c) + floor(vWorldPos.xz * 0.1)));
+              base = mix(glass, vec3(1.0, 0.86, 0.55), lit * 0.8);
+              emis = lit * 0.25;
+            } else {
+              float sill = step(0.12, f.y) * step(f.y, 0.2) * step(0.18, f.x) * step(f.x, 0.82);
+              base = mix(base, vec3(1.0), sill * 0.6);
+            }
+          }
+        }
+        vec3 col = toonShade(base, normalize(vNormalV), normalize(vViewPos), 1.0) + base * emis;
+        col = applyFog(col, length(vViewPos));
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+  m.uniforms.uColor.value.set(color);
+  m.uniforms.uSpecular.value = opts.specular ?? 0.2;
+  m.uniforms.uRimStrength.value = opts.rim ?? 0.25;
   sharedMaterials.add(m);
   return m;
 }
@@ -352,7 +465,14 @@ export function tileMaterial(atlas, atlasGrid) {
           float gloss = smoothstep(0.08, 0.0, abs(p.x + p.y * 0.6 - 0.9)) * 0.25;
           col += gloss;
           // 별 칸 Lv3: 빛 줄기가 훑고 지나가는 반짝임 + 트윙클 + 발광
-          if (vGlow > 0.5) {
+          // 운명의 하트 칸: 무지개색이 흐름
+          if (vGlow > 1.5) {
+            float hh = fract(uTime * 0.25 + (vIconP.x - vIconP.y) * 0.12);
+            vec3 rainbow = clamp(abs(mod(hh * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+            float rim = 1.0 - smoothstep(-0.5, -0.2, sdRoundBox(vIconP, uTileHalf, 0.45));
+            col = mix(col, mix(rainbow, vec3(1.0), 0.25), (1.0 - iconSample.a * iconMask) * rim * 0.85);
+            emis += 0.2;
+          } else if (vGlow > 0.5) {
             float sweep = fract(uTime * 0.45);
             float band = smoothstep(0.22, 0.0, abs((vIconP.x + vIconP.y) * 0.25 + 0.5 - sweep * 1.6 + 0.3));
             vec2 cell = floor(vIconP * 3.0);
@@ -364,7 +484,7 @@ export function tileMaterial(atlas, atlasGrid) {
           emis += vActive * (0.25 + 0.2 * sin(uTime * 6.0));
         } else {
           base *= 0.72;
-          emis += vGlow * (0.25 + 0.15 * sin(uTime * 3.0));
+          emis += step(0.5, vGlow) * step(vGlow, 1.5) * (0.25 + 0.15 * sin(uTime * 3.0));
         }
         vec3 col = toonShade(base, N, V, 1.0) + base * emis + vec3(1.0, 0.95, 0.6) * emis * 0.4;
         col = applyFog(col, length(vViewPos));
@@ -387,9 +507,9 @@ export function waterMaterial() {
       uDeep: { value: new THREE.Color(0x1c6fb8) },
       uShallow: { value: new THREE.Color(0x4fd6e0) },
       uSky: { value: new THREE.Color(0xcfeaff) },
-      uIslandCenter: { value: new THREE.Vector2(0, 0) },
-      uIslandHalf: { value: new THREE.Vector2(60, 60) },
-      uIslandRadius: { value: 18 },
+      // 섬 4개(본 섬 + 서브맵 섬 3개): (중심 x, 중심 z, 반폭 x, 반폭 z), 모서리 반지름
+      uIsl: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, 0)) },
+      uIslR: { value: [1, 1, 1, 1] },
       uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
       uFogColor: { value: new THREE.Color(0xcfe8ff) },
       uFogNear: { value: 90 },
@@ -397,13 +517,18 @@ export function waterMaterial() {
     },
     vertexShader: /* glsl */`
       uniform float uTime;
-      uniform vec2 uIslandCenter, uIslandHalf;
-      uniform float uIslandRadius;
+      uniform vec4 uIsl[4];
+      uniform float uIslR[4];
+      float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+      float islandSd(vec2 p) {
+        float d = 1e5;
+        for (int i = 0; i < 4; i++) { if (uIsl[i].z > 0.0) d = min(d, sdRoundBox(p - uIsl[i].xy, uIsl[i].zw, uIslR[i])); }
+        return d;
+      }
       varying vec3 vWorld;
       varying vec3 vN;
       varying float vCrest;
       varying float vDepth;
-      float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
       vec3 wave(vec2 dir, float freq, float amp, float speed, vec3 p, inout vec3 tangent, inout vec3 binormal) {
         float f = dot(normalize(dir), p.xz) * freq + uTime * speed;
         float s = sin(f), c = cos(f);
@@ -416,7 +541,7 @@ export function waterMaterial() {
         vec3 p = (modelMatrix * vec4(position, 1.0)).xyz;
         vec3 t = vec3(1, 0, 0), b = vec3(0, 0, 1);
         vec3 off = vec3(0.0);
-        float calm = smoothstep(-2.0, 12.0, sdRoundBox(p.xz - uIslandCenter, uIslandHalf, uIslandRadius));
+        float calm = smoothstep(-2.0, 12.0, islandSd(p.xz));
         off += wave(vec2(1.0, 0.3), 0.12, 0.45, 1.1, p, t, b);
         off += wave(vec2(-0.4, 1.0), 0.19, 0.25, 1.6, p, t, b);
         off += wave(vec2(0.7, -0.8), 0.31, 0.12, 2.3, p, t, b);
@@ -431,20 +556,26 @@ export function waterMaterial() {
     fragmentShader: /* glsl */`
       uniform float uTime;
       uniform vec3 uDeep, uShallow, uSky, uFogColor, uSunDir;
-      uniform vec2 uIslandCenter, uIslandHalf;
-      uniform float uIslandRadius, uFogNear, uFogFar;
+      uniform float uFogNear, uFogFar;
+      uniform vec4 uIsl[4];
+      uniform float uIslR[4];
+      float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+      float islandSd(vec2 p) {
+        float d = 1e5;
+        for (int i = 0; i < 4; i++) { if (uIsl[i].z > 0.0) d = min(d, sdRoundBox(p - uIsl[i].xy, uIsl[i].zw, uIslR[i])); }
+        return d;
+      }
       varying vec3 vWorld;
       varying vec3 vN;
       varying float vCrest;
       varying float vDepth;
-      float sdRoundBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 45758.5453); }
       float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
         return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y); }
       void main() {
         vec3 V = normalize(cameraPosition - vWorld);
         vec3 N = normalize(vN);
-        float shore = sdRoundBox(vWorld.xz - uIslandCenter, uIslandHalf, uIslandRadius);
+        float shore = islandSd(vWorld.xz);
         float shallow = 1.0 - smoothstep(0.0, 22.0, shore);
         vec3 col = mix(uDeep, uShallow, shallow);
         // 코스틱 느낌의 셀 무늬
@@ -463,7 +594,7 @@ export function waterMaterial() {
         float band = sin(shore * 0.9 - uTime * 2.2) * 0.5 + 0.5;
         float foam = (1.0 - smoothstep(0.0, 3.2, shore)) * smoothstep(0.45, 0.55, band + noise(vWorld.xz * 0.8) * 0.4);
         foam = max(foam, 1.0 - smoothstep(0.0, 0.9, shore));
-        foam += smoothstep(0.5, 0.62, vCrest + noise(vWorld.xz * 0.5 + uTime) * 0.3) * 0.5;
+        foam += smoothstep(0.62, 0.72, vCrest + noise(vWorld.xz * 0.5 + uTime) * 0.2) * 0.25;
         col = mix(col, vec3(1.0), clamp(foam, 0.0, 1.0));
         col = mix(col, uFogColor, smoothstep(uFogNear, uFogFar, vDepth));
         gl_FragColor = vec4(col, 1.0);

@@ -29,6 +29,7 @@ export function estimateMs(events) {
     else if (e.t === 'move') ms += e.path.length * 280 + 200;
     else if (e.t === 'msg') ms += 1300;
     else if (e.t === 'era') ms += 2600;
+    else if (e.t === 'warp') ms += e.fly ? 2600 : 900;
     else if (e.t === 'marry' || e.t === 'kid' || e.t === 'goal') ms += 1500;
     else if (e.t === 'result') ms += 4000;
     else ms += 60;

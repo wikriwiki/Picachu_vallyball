@@ -6,18 +6,19 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { BOARD } from '/shared/board.js';
+import { BOARD, LAYOUT } from '/shared/board.js';
 import { ERAS, TILE_INFO } from '/shared/data.js';
 import {
   toonMaterial, outlineMaterial, roadMaterial, tileMaterial, waterMaterial, skyMaterial, particleMaterial, FinalShader, sharedMaterials,
 } from './shaders.js';
 import { buildAvatar, setAvatarAge, buildCar, buildPeg, outlined } from './avatar.js';
+import { buildCity } from './map.js';
 
-// 맵 배치 수치는 docs/ADR.md §12.3 기준
-const STEP = 3.0; // 칸 간격 (칸 폭 2.9 → 칸끼리 거의 붙어 보임)
-const ROW = 60; // 가로 레인 길이
-const RS = 15; // 레인 사이 간격 (사이에 도로와 집이 들어감)
+// 맵 배치 수치는 docs/ADR.md §12.3 (shared/board.js LAYOUT)
+const { STEP, ROW, RS } = LAYOUT;
 const TILE_Y = 0.32;
+// 길 색 (원작 화면: 일반 길 노랑, 연애 길 분홍, 커리어 길 주황)
+const ROUTE_COLOR = { main: 0xffe27a, love: 0xff9ec8, career: 0xffb05c, study: 0x9cc9ff, sub: 0xfff1c9 };
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -31,19 +32,6 @@ function mulberry(seed) {
 }
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
-// 원작처럼 직선 레인 + 직각 코너로 이어지는 경로
-function curvePoint(s) {
-  s = Math.max(0, s);
-  const per = ROW + RS;
-  const k = Math.floor(s / per);
-  const u = s - k * per;
-  const dir = k % 2 === 0 ? 1 : -1;
-  const z0 = k * RS;
-  const xStart = dir === 1 ? -ROW / 2 : ROW / 2;
-  if (u < ROW) return new THREE.Vector3(xStart + dir * u, 0, z0);
-  return new THREE.Vector3(xStart + dir * ROW, 0, z0 + (u - ROW));
-}
-
 function sdRoundBox(px, pz, hx, hz, r) {
   const qx = Math.abs(px) - hx + r;
   const qz = Math.abs(pz) - hz + r;
@@ -52,7 +40,7 @@ function sdRoundBox(px, pz, hx, hz, r) {
 
 function makeIconAtlas() {
   const cell = 128;
-  const grid = 4;
+  const grid = 6;
   const c = document.createElement('canvas');
   c.width = c.height = cell * grid;
   const g = c.getContext('2d');
@@ -126,6 +114,46 @@ function makeIconAtlas() {
       g.fillStyle = '#555'; g.beginPath(); g.moveTo(x - 26, y - 34); g.lineTo(x + 34, y); g.lineTo(x - 26, y + 34); g.closePath(); g.fill();
     },
     goal(x, y) { g.fillStyle = '#b8860b'; g.font = 'bold 40px sans-serif'; g.fillText('GOAL', x, y + 2); },
+    destiny(x, y) { heart(x, y, 38, '#ffffff'); star(x + 30, y - 30, 10, 4, '#ffffff'); star(x - 32, y + 26, 7, 3, '#ffffff'); },
+    travel(x, y) {
+      // 비행기
+      g.save(); g.translate(x, y); g.rotate(-0.6); g.fillStyle = '#ffffff';
+      g.beginPath(); g.ellipse(0, 0, 44, 9, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(-6, 0); g.lineTo(14, -34); g.lineTo(22, -34); g.lineTo(12, 0); g.lineTo(22, 34); g.lineTo(14, 34); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(-34, 0); g.lineTo(-40, -16); g.lineTo(-34, -16); g.lineTo(-26, 0); g.lineTo(-34, 16); g.lineTo(-40, 16); g.closePath(); g.fill();
+      g.restore();
+    },
+    substart(x, y) { g.fillStyle = '#2a2238'; g.font = 'bold 30px sans-serif'; g.fillText('WELCOME', x, y); },
+    rest(x, y) { g.fillStyle = '#ffffff'; g.font = 'bold 64px sans-serif'; g.fillText('Zz', x, y + 4); },
+    farm(x, y) {
+      g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(x, y + 40); g.lineTo(x - 16, y - 10); g.quadraticCurveTo(x, y - 22, x + 16, y - 10); g.closePath(); g.fill();
+      g.fillStyle = '#2f9e44'; for (const dx of [-10, 0, 10]) { g.beginPath(); g.ellipse(x + dx, y - 26, 5, 14, dx * 0.03, 0, 7); g.fill(); }
+    },
+    bet(x, y) {
+      g.fillStyle = '#ffffff'; roundRect(x - 34, y - 34, 68, 68, 12); g.fill();
+      g.fillStyle = '#f03e3e'; for (const [dx, dy] of [[-16, -16], [16, 16], [0, 0], [16, -16], [-16, 16]]) { g.beginPath(); g.arc(x + dx, y + dy, 7, 0, 7); g.fill(); }
+    },
+    dig(x, y) {
+      g.strokeStyle = '#ffffff'; g.lineWidth = 9; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x - 30, y + 34); g.lineTo(x + 20, y - 18); g.stroke();
+      g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(x + 8, y - 36); g.lineTo(x + 40, y - 30); g.lineTo(x + 34, y - 4); g.closePath(); g.fill();
+    },
+    jackpot(x, y) { g.fillStyle = '#ffffff'; g.font = 'bold 60px sans-serif'; g.fillText('777', x, y + 4); },
+    pray(x, y) {
+      // 도리이
+      g.fillStyle = '#ffffff';
+      g.fillRect(x - 46, y - 34, 92, 10); g.fillRect(x - 38, y - 18, 76, 8);
+      g.fillRect(x - 30, y - 30, 10, 70); g.fillRect(x + 20, y - 30, 10, 70);
+    },
+    omikuji(x, y) {
+      g.fillStyle = '#e64980'; roundRect(x - 22, y - 40, 44, 80, 8); g.fill();
+      g.fillStyle = '#ffffff'; g.font = 'bold 34px sans-serif'; g.fillText('吉', x, y + 2);
+    },
+    return(x, y) {
+      g.strokeStyle = '#ffffff'; g.lineWidth = 10; g.lineCap = 'round';
+      g.beginPath(); g.arc(x, y, 30, Math.PI * 0.2, Math.PI * 1.7); g.stroke();
+      g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(x + 36, y - 30); g.lineTo(x + 36, y + 2); g.lineTo(x + 8, y - 22); g.closePath(); g.fill();
+    },
   };
   function roundRect(x, y, w, h, r) {
     g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
@@ -184,6 +212,32 @@ function textSprite(text, { color = '#fff', bg = 'rgba(40,30,70,0.85)', size = 6
   return sp;
 }
 
+// 말 위에 뜨는 핀 마커 (원작 화면: 얼굴이 들어간 지도 핀)
+function pinSprite(p) {
+  const av = p.avatar || {};
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 176;
+  const g = c.getContext('2d');
+  g.fillStyle = av.shirt || '#ff6b6b';
+  g.strokeStyle = '#2a2238'; g.lineWidth = 6;
+  g.beginPath(); g.arc(64, 62, 54, Math.PI * 0.8, Math.PI * 2.2); g.lineTo(64, 168); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(64, 62, 42, 0, 7); g.fill();
+  g.fillStyle = av.skin || '#f5d0b0'; g.beginPath(); g.arc(64, 70, 30, 0, 7); g.fill();
+  g.fillStyle = av.hair || '#4a3020'; g.beginPath(); g.arc(64, 62, 32, Math.PI, 0); g.fill();
+  g.fillStyle = '#2a2238'; g.beginPath(); g.arc(53, 72, 4, 0, 7); g.arc(75, 72, 4, 0, 7); g.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  sp.scale.set(1.3, 1.8, 1);
+  sp.center.set(0.5, 0);
+  const label = textSprite(p.name, { bg: av.shirt || '#555', size: 40, scale: 0.55 });
+  label.position.y = -0.35;
+  sp.add(label);
+  return sp;
+}
+
+const ERAS_SUB_NAME = { countryside: '🌾 시골 마을', casino: '🎰 일확천금 섬', shrine: '⛩️ 신들의 섬' };
+
 export class World {
   constructor(canvas) {
     this.canvas = canvas;
@@ -206,9 +260,10 @@ export class World {
     this.buildSky();
     this.buildBoard();
     this.buildTerrain();
+    this.buildSubIslands();
     this.buildWater();
-    this.buildRoads();
-    this.buildDecor();
+    this.city = buildCity(this, LAYOUT);
+    this.buildJunctionArrows();
     this.buildParticles();
     this.buildComposer();
     this.bindControls();
@@ -249,36 +304,37 @@ export class World {
 
   buildBoard() {
     const n = BOARD.tiles.length;
-    this.tilePos = [];
-    this.tileHeading = [];
-    for (let i = 0; i < n; i++) {
-      const s = i * STEP;
-      const p = curvePoint(s);
-      const q = curvePoint(s + 0.5);
-      this.tilePos.push(new THREE.Vector3(p.x, TILE_Y, p.z));
-      this.tileHeading.push(Math.atan2(q.x - p.x, q.z - p.z));
-    }
-    // 도로 리본
-    const pts = [];
-    for (let s = 0; s <= (n - 1) * STEP + 0.01; s += 0.5) pts.push(curvePoint(s));
-    const pos = [];
-    const idx = [];
-    const width = 1.75;
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[Math.max(0, i - 1)];
-      const b = pts[Math.min(pts.length - 1, i + 1)];
-      const t = new THREE.Vector3().subVectors(b, a).normalize();
-      const nrm = new THREE.Vector3(-t.z, 0, t.x);
-      pos.push(pts[i].x + nrm.x * width, 0.08, pts[i].z + nrm.z * width, pts[i].x - nrm.x * width, 0.08, pts[i].z - nrm.z * width);
-      if (i > 0) { const k = i * 2; idx.push(k - 2, k - 1, k, k - 1, k + 1, k); }
-    }
-    const rg = new THREE.BufferGeometry();
-    rg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    rg.setIndex(idx);
-    rg.computeVertexNormals();
-    const road = new THREE.Mesh(rg, toonMaterial(0xf6ecd2, { rim: 0.05, specular: 0 }));
-    road.receiveShadow = true;
-    this.scene.add(road);
+    this.tilePos = BOARD.tiles.map((t) => new THREE.Vector3(t.x, TILE_Y, t.z));
+    const prevOf = new Array(n).fill(-1);
+    BOARD.tiles.forEach((t) => t.next.forEach((k) => { if (prevOf[k] < 0) prevOf[k] = t.i; }));
+    this.tileHeading = BOARD.tiles.map((t) => {
+      const o = t.next.length ? BOARD.tiles[t.next[0]] : prevOf[t.i] >= 0 ? t : null;
+      if (!o) return 0;
+      const f = t.next.length ? t : BOARD.tiles[prevOf[t.i]];
+      return Math.atan2(o.x - f.x, o.z - f.z);
+    });
+    // 길 바닥 (루트별 색 띠): 칸마다 받침 + 이웃 칸 사이 연결
+    const pads = [];
+    BOARD.tiles.forEach((t) => {
+      pads.push({ x: t.x, z: t.z, w: 3.5, d: 3.5, c: ROUTE_COLOR[t.route] });
+      for (const k of t.next) {
+        const u = BOARD.tiles[k];
+        const route = t.route === 'main' ? u.route : t.route;
+        pads.push({ x: (t.x + u.x) / 2, z: (t.z + u.z) / 2, w: Math.abs(u.x - t.x) + 1.6, d: Math.abs(u.z - t.z) + 1.6, c: ROUTE_COLOR[route] });
+      }
+    });
+    const padG = new THREE.BoxGeometry(1, 0.16, 1);
+    padG.translate(0, 0.08, 0);
+    const padMesh = new THREE.InstancedMesh(padG, toonMaterial(0xffffff, { rim: 0.05, specular: 0 }), pads.length);
+    const pm = new THREE.Matrix4();
+    const pc = new THREE.Color();
+    pads.forEach((o, k) => {
+      pm.makeScale(o.w, 1, o.d).setPosition(o.x, 0, o.z);
+      padMesh.setMatrixAt(k, pm);
+      padMesh.setColorAt(k, pc.set(o.c));
+    });
+    padMesh.receiveShadow = true;
+    this.scene.add(padMesh);
 
     // 칸 (인스턴싱)
     const shape = new THREE.Shape();
@@ -298,10 +354,10 @@ export class World {
     const aGlow = new Float32Array(n);
     const col = new THREE.Color();
     BOARD.tiles.forEach((t, i) => {
-      aGlow[i] = t.type === 'star3' ? 1 : 0;
+      aGlow[i] = t.type === 'star3' ? 1 : t.type === 'destiny' ? 2 : 0;
       aIcon[i] = this.atlas.index(t.type);
       aIndex[i] = i;
-      col.set(t.type === 'start' ? ERAS[t.era].color : TILE_INFO[t.type].color);
+      col.set(t.type === 'start' && t.era >= 0 ? ERAS[t.era].color : TILE_INFO[t.type].color);
       if (t.type === 'end' || t.type === 'goal') col.set(0xffffff);
       aColor.set([col.r, col.g, col.b], i * 3);
     });
@@ -356,7 +412,7 @@ export class World {
       this.scene.add(sp);
     });
     // GOAL 아치
-    const gi = n - 1;
+    const gi = BOARD.eraEnd[BOARD.eraEnd.length - 1];
     const gp = this.tilePos[gi];
     const goal = new THREE.Group();
     const gold = toonMaterial(0xffd43b, { specular: 0.8, rim: 0.6 });
@@ -376,11 +432,11 @@ export class World {
 
   buildTerrain() {
     let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity;
-    for (const p of this.tilePos) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
+    for (const t of BOARD.tiles) { if (t.era < 0) continue; minX = Math.min(minX, t.x); maxX = Math.max(maxX, t.x); minZ = Math.min(minZ, t.z); maxZ = Math.max(maxZ, t.z); }
     const cx = (minX + maxX) / 2;
     const cz = (minZ + maxZ) / 2;
-    const hx = (maxX - minX) / 2 + 16;
-    const hz = (maxZ - minZ) / 2 + 16;
+    const hx = (maxX - minX) / 2 + 26;
+    const hz = (maxZ - minZ) / 2 + 20;
     this.islandCenter = new THREE.Vector2(cx, cz);
     this.islandHalf = new THREE.Vector2(hx, hz);
     this.islandRadius = 22;
@@ -401,10 +457,11 @@ export class World {
       return (h(xi, zi) * (1 - u) + h(xi + 1, zi) * u) * (1 - v) + (h(xi, zi + 1) * (1 - u) + h(xi + 1, zi + 1) * u) * v;
     };
     // 보드 영역(레인+도로) 밖으로 벗어난 거리: 보드 안은 평지, 밖에만 언덕
-    this.boardOut = (x, z) => Math.hypot(Math.max(0, Math.abs(x - cx) - ((maxX - minX) / 2 + 7)), Math.max(0, Math.abs(z - cz) - ((maxZ - minZ) / 2 + 7)));
+    this.boardOut = (x, z) => Math.hypot(Math.max(0, Math.abs(x - cx) - ((maxX - minX) / 2 + 12)), Math.max(0, Math.abs(z - cz) - ((maxZ - minZ) / 2 + 12)));
     this.pathDist = (x, z) => {
       let best = Infinity; let bi = 0;
       for (let i = 0; i < this.tilePos.length; i += 1) {
+        if (BOARD.tiles[i].era < 0) continue; // 서브맵 칸 제외
         const p = this.tilePos[i];
         const d = (p.x - x) ** 2 + (p.z - z) ** 2;
         if (d < best) { best = d; bi = i; }
@@ -451,9 +508,11 @@ export class World {
 
   buildWater() {
     this.waterMat = waterMaterial();
-    this.waterMat.uniforms.uIslandCenter.value.copy(this.islandCenter);
-    this.waterMat.uniforms.uIslandHalf.value.copy(this.islandHalf);
-    this.waterMat.uniforms.uIslandRadius.value = this.islandRadius;
+    const isl = [{ cx: this.islandCenter.x, cz: this.islandCenter.y, hx: this.islandHalf.x, hz: this.islandHalf.y, r: this.islandRadius }, ...this.subIslands];
+    isl.forEach((o, k) => {
+      this.waterMat.uniforms.uIsl.value[k].set(o.cx, o.cz, o.hx, o.hz);
+      this.waterMat.uniforms.uIslR.value[k] = o.r;
+    });
     this.waterMat.uniforms.uSunDir.value.copy(this.sunDir);
     const g = new THREE.PlaneGeometry(900, 900, 220, 220);
     g.rotateX(-Math.PI / 2);
@@ -462,105 +521,64 @@ export class World {
     this.scene.add(water);
   }
 
-  // 레인 사이 도로 + 양옆 세로 도로 (docs/ADR.md §12.3)
-  buildRoads() {
-    const rows = Math.ceil(((BOARD.tiles.length - 1) * STEP) / (ROW + RS));
-    const side = ROW / 2 + 8;
-    const W = 3.2;
-    this.roadLines = { zs: [], side, zMin: -RS / 2, zMax: (rows - 1) * RS + RS / 2 };
-    for (let k = -1; k < rows; k++) this.roadLines.zs.push(k * RS + RS / 2);
-    const mat = roadMaterial();
-    const addRoad = (cx, cz, len, horizontal) => {
-      const g = new THREE.PlaneGeometry(len, W, Math.ceil(len / 2), 1);
-      const uv = g.attributes.uv;
-      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * len);
-      g.rotateX(-Math.PI / 2);
-      if (!horizontal) g.rotateY(Math.PI / 2);
-      const m = new THREE.Mesh(g, mat);
-      m.position.set(cx, 0.06, cz);
+  // 서브맵 섬 3개 (docs/ADR.md §6.12, §12.3)
+  buildSubIslands() {
+    this.subIslands = [];
+    const sand = new THREE.Color(0xf4e2a8);
+    const grassCol = { countryside: 0x9fd46b, casino: 0x7fc98a, shrine: 0xa8d08d };
+    for (const [id, start] of Object.entries(BOARD.subStart)) {
+      const ts = BOARD.tiles.filter((t) => t.era < 0 && t.sub === id);
+      const cx = (Math.min(...ts.map((t) => t.x)) + Math.max(...ts.map((t) => t.x))) / 2;
+      const cz = (Math.min(...ts.map((t) => t.z)) + Math.max(...ts.map((t) => t.z))) / 2;
+      const hx = 16; const hz = 14; const rr = 9;
+      this.subIslands.push({ id, cx, cz, hx, hz, r: rr });
+      const geo = new THREE.PlaneGeometry(hx * 2 + 24, hz * 2 + 24, 60, 56);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(cx, 0, cz);
+      const pos = geo.attributes.position;
+      const colors = new Float32Array(pos.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i); const z = pos.getZ(i);
+        const d = sdRoundBox(x - cx, z - cz, hx, hz, rr);
+        pos.setY(i, d > 0 ? -0.5 - Math.min(d * 0.3, 5) : 0.02);
+        c.set(grassCol[id]);
+        c.lerp(sand, 1 - Math.min(1, Math.max(0, (-d - 1) / 3)));
+        colors.set([c.r, c.g, c.b], i * 3);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, toonMaterial(0xffffff, { vertexColors: true, grass: 1, rim: 0.05, specular: 0 }));
       m.receiveShadow = true;
       this.scene.add(m);
-    };
-    for (const z of this.roadLines.zs) addRoad(0, z, side * 2 + W, true);
-    const zLen = this.roadLines.zMax - this.roadLines.zMin;
-    for (const sx of [-side, side]) addRoad(sx, (this.roadLines.zMax + this.roadLines.zMin) / 2, zLen, false);
-    this.roadDist = (x, z) => {
-      let best = Infinity;
-      if (Math.abs(x) <= side + W) for (const rz of this.roadLines.zs) best = Math.min(best, Math.abs(z - rz));
-      if (z >= this.roadLines.zMin - W && z <= this.roadLines.zMax + W) best = Math.min(best, Math.abs(Math.abs(x) - side));
-      return best;
-    };
+      const label = textSprite(ERAS_SUB_NAME[id], { bg: '#4dd4f0', color: '#fff', size: 56, scale: 1.2 });
+      label.position.set(cx, 7, cz - hz + 2);
+      this.scene.add(label);
+    }
   }
 
-  buildDecor() {
-    const rng = mulberry(99);
-    const trunks = []; const leaves = []; const pines = []; const houses = []; const towers = []; const toys = [];
-    const placed = []; // 장식끼리 겹치지 않게 (최소 간격 3.4)
-    const hx = this.islandHalf.x; const hz = this.islandHalf.y;
-    for (let k = 0; k < 1500; k++) {
-      const x = this.islandCenter.x + (rng() * 2 - 1) * hx;
-      const z = this.islandCenter.y + (rng() * 2 - 1) * hz;
-      const d = sdRoundBox(x - this.islandCenter.x, z - this.islandCenter.y, hx, hz, this.islandRadius);
-      if (d > -5) continue;
-      const [pd, ti] = this.pathDist(x, z);
-      if (pd < 3.4) continue;
-      const rd = this.roadDist(x, z);
-      if (rd < 3.0) continue;
-      const y = this.terrainHeight(x, z);
-      const era = ERAS[BOARD.tiles[ti].era].id;
-      const s = 0.7 + rng() * 0.5;
-      const rot = rng() < 0.5 ? 0 : Math.PI / 2;
-      const crowded = placed.some((o) => (o.x - x) ** 2 + (o.z - z) ** 2 < 3.4 * 3.4);
-      if (crowded) continue;
-      placed.push({ x, z });
-      if (rd < 5 && pd > 3.6 && rng() < 0.7) {
-        // 도로변 건물
-        if (era === 'baby') toys.push({ x, y, z, s, rot, c: [0xff8787, 0x74c0fc, 0xffe066, 0x8ce99a][Math.floor(rng() * 4)] });
-        else if ((era === 'adult1' || era === 'adult2') && rng() < 0.5) towers.push({ x, y, z, s: s * 0.8, h: 2.5 + rng() * 4, rot, c: [0xdee2e6, 0xa5d8ff, 0xffd8a8, 0xd0bfff][Math.floor(rng() * 4)] });
-        else houses.push({ x, y, z, s, rot, c: [0xfff5e6, 0xffe3e3, 0xe7f5ff, 0xfff9db][Math.floor(rng() * 4)], roof: [0xe8590c, 0x1971c2, 0x2f9e44, 0xc2255c][Math.floor(rng() * 4)] });
-      } else if (rng() < 0.5) {
-        trunks.push({ x, y, z, s }); leaves.push({ x, y, z, s, c: [0x69db7c, 0x8ce99a, 0x51cf66, 0xa9e34b][Math.floor(rng() * 4)] });
-      } else pines.push({ x, y, z, s, c: [0x2f9e44, 0x37b24d, 0x40c057][Math.floor(rng() * 3)] });
-    }
-    const m4 = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const col = new THREE.Color();
-    const inst = (geo, list, mat, place, outline = true) => {
-      if (!list.length) return;
-      const im = new THREE.InstancedMesh(geo, mat, list.length);
-      list.forEach((o, i) => {
-        const [p, rot, sc, c] = place(o);
-        q.setFromAxisAngle(up, rot);
-        m4.compose(p, q, sc);
-        im.setMatrixAt(i, m4);
-        if (c != null) im.setColorAt(i, col.set(c));
-      });
-      im.castShadow = true;
-      im.receiveShadow = true;
-      this.scene.add(im);
-      if (outline) {
-        const ol = new THREE.InstancedMesh(geo, (this._olMat ||= outlineMaterial(0x2a2238, 0.04)), list.length);
-        ol.instanceMatrix = im.instanceMatrix;
-        this.scene.add(ol);
+  // 분기점 파란 화살표 (원작 화면)
+  buildJunctionArrows() {
+    this.arrows = [];
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.9); shape.lineTo(0.8, 0); shape.lineTo(0.3, 0); shape.lineTo(0.3, -0.8); shape.lineTo(-0.3, -0.8); shape.lineTo(-0.3, 0); shape.lineTo(-0.8, 0); shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.25, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.06, bevelSegments: 2 });
+    g.rotateX(-Math.PI / 2);
+    g.translate(0, 0, 0);
+    const mat = toonMaterial(0x3b9bff, { specular: 0.8, rim: 0.6, emissive: 0x0a2a55 });
+    for (const br of BOARD.branches) {
+      const j = BOARD.tiles[br.junction];
+      for (const n of j.next) {
+        const t = BOARD.tiles[n];
+        const a = new THREE.Group();
+        const m = outlined(a, g, mat);
+        m.rotation.y = Math.atan2(t.x - j.x, t.z - j.z) + Math.PI;
+        a.position.set((j.x + t.x) / 2, 1.2, (j.z + t.z) / 2);
+        a.scale.setScalar(1.1);
+        this.scene.add(a);
+        this.arrows.push(a);
       }
-    };
-    const V = (x, y, z) => new THREE.Vector3(x, y, z);
-    const trunkG = new THREE.CylinderGeometry(0.18, 0.26, 1.4, 7); trunkG.translate(0, 0.7, 0);
-    const leafG = new THREE.IcosahedronGeometry(1.1, 1); leafG.translate(0, 2.1, 0);
-    const pineG = new THREE.ConeGeometry(1.0, 3.2, 8); pineG.translate(0, 1.9, 0);
-    const houseG = new THREE.BoxGeometry(2, 1.6, 2); houseG.translate(0, 0.8, 0);
-    const roofG = new THREE.ConeGeometry(1.75, 1.3, 4); roofG.rotateY(Math.PI / 4); roofG.translate(0, 2.25, 0);
-    const towerG = new THREE.BoxGeometry(2.2, 1, 2.2); towerG.translate(0, 0.5, 0);
-    const toyG = new THREE.BoxGeometry(1.3, 1.3, 1.3); toyG.translate(0, 0.65, 0);
-    const white = toonMaterial(0xffffff);
-    inst(trunkG, trunks, toonMaterial(0x8d5a3b), (o) => [V(o.x, o.y, o.z), 0, V(o.s, o.s, o.s), null]);
-    inst(leafG, leaves, toonMaterial(0xffffff, { rim: 0.4 }), (o) => [V(o.x, o.y, o.z), 0, V(o.s, o.s, o.s), o.c]);
-    inst(pineG, pines, toonMaterial(0xffffff, { rim: 0.4 }), (o) => [V(o.x, o.y, o.z), 0, V(o.s, o.s * 1.1, o.s), o.c]);
-    inst(houseG, houses, white, (o) => [V(o.x, o.y, o.z), o.rot, V(o.s, o.s, o.s), o.c]);
-    inst(roofG, houses, toonMaterial(0xffffff, { specular: 0.4 }), (o) => [V(o.x, o.y, o.z), o.rot, V(o.s, o.s, o.s), o.roof]);
-    inst(towerG, towers, toonMaterial(0xffffff, { specular: 0.6, rim: 0.5 }), (o) => [V(o.x, o.y, o.z), o.rot, V(o.s, o.h, o.s), o.c]);
-    inst(toyG, toys, toonMaterial(0xffffff, { specular: 0.5 }), (o) => [V(o.x, o.y, o.z), o.rot, V(o.s, o.s, o.s), o.c]);
+    }
   }
 
   buildParticles() {
@@ -637,7 +655,7 @@ export class World {
     root.add(car);
     const pegs = new THREE.Group();
     root.add(pegs);
-    const name = textSprite(p.name, { bg: p.avatar.shirt || '#555', size: 40, scale: 0.7 });
+    const name = pinSprite(p);
     name.position.y = 3.1;
     root.add(name);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.05, 32), new THREE.MeshBasicMaterial({ color: p.avatar.shirt || '#fff', transparent: true, opacity: 0.85 }));
@@ -645,7 +663,7 @@ export class World {
     ring.position.y = 0.55;
     root.add(ring);
     this.scene.add(root);
-    pc = { root, fig, car, pegs, name, ring, index, tile: p.tile, era: -1, kids: -1, married: null, hop: 0 };
+    pc = { root, fig, car, pegs, name, ring, index, tile: p.tile, era: -1, kids: -1, married: null, hop: 0, nameY: 3.1 };
     this.pieces.set(p.id, pc);
     root.position.copy(this.slotPos(p.tile, index));
     root.rotation.y = this.tileHeading[p.tile];
@@ -677,7 +695,7 @@ export class World {
         const adult = state.era >= 4;
         pc.car.visible = adult;
         pc.fig.position.set(0, adult ? 0.45 : 0, adult ? -0.15 : 0);
-        pc.name.position.y = adult ? 3.3 : 1.2 + 1.9 * pc.fig.scale.x;
+        pc.nameY = adult ? 3.3 : 1.2 + 1.9 * pc.fig.scale.x;
       }
       const kidsKey = p.kids.length + (p.spouse ? 100 : 0);
       if (pc.kids !== kidsKey) {
@@ -686,7 +704,8 @@ export class World {
         const spots = [[0.3, 0.65, 0.35], [-0.3, 0.65, -0.45], [0.3, 0.65, -0.45], [-0.3, 0.65, 0.35], [0, 0.65, -0.1]];
         let k = 0;
         if (p.spouse) {
-          const sp = buildPeg(0xff8fab);
+          const c = p.partner && state.partners ? state.partners.find((x) => x.id === p.partner.id) : null;
+          const sp = buildPeg(c ? c.color : 0xff8fab);
           sp.position.set(...spots[k++]);
           pc.pegs.add(sp);
         }
@@ -732,17 +751,24 @@ export class World {
     }
   }
 
-  async warp(pid, tile, index) {
+  async warp(pid, tile, index, fly = false) {
     const pc = this.pieces.get(pid);
     if (!pc) return;
     const from = pc.root.position.clone();
     const to = this.slotPos(tile, index);
-    await this.tween(900, (t) => {
+    const dist = from.distanceTo(to);
+    // fly: 여행(비행기) — 높이 날아서 이동, 카메라가 따라감
+    const dur = fly ? Math.min(2600, 900 + dist * 12) : 900;
+    const h = fly ? Math.max(12, dist * 0.25) : 6;
+    if (fly) this.orbit.distGoal = Math.max(this.orbit.distGoal, 45);
+    await this.tween(dur, (t) => {
       const e = easeInOut(t);
       pc.root.position.lerpVectors(from, to, e);
-      pc.root.position.y = to.y + Math.sin(t * Math.PI) * 6;
-      pc.root.rotation.y += 0.25;
+      pc.root.position.y = to.y + Math.sin(t * Math.PI) * h;
+      if (fly) pc.root.rotation.y = Math.atan2(to.x - from.x, to.z - from.z);
+      else pc.root.rotation.y += 0.25;
     });
+    if (fly) this.orbit.distGoal = 30;
     pc.root.rotation.y = this.tileHeading[tile];
     pc.tile = tile;
   }
@@ -758,7 +784,7 @@ export class World {
   overview() {
     this.follow = null;
     this.camGoal.set(this.islandCenter.x, 0, this.islandCenter.y);
-    this.orbit.distGoal = 150;
+    this.orbit.distGoal = 210;
   }
   zoomDefault() { this.orbit.distGoal = 30; }
 
@@ -822,7 +848,10 @@ export class World {
     this.waterMat.uniforms.uTime.value = time;
     this.skyMat.uniforms.uTime.value = time;
     this.particleMat.uniforms.uTime.value = time;
+    if (this.city) this.city.update(time, dt);
+    for (const a of this.arrows) a.position.y = 1.3 + Math.sin(time * 4) * 0.25;
     for (const pc of this.pieces.values()) {
+      pc.name.position.y = pc.nameY + (pc.ring.visible ? Math.abs(Math.sin(time * 4)) * 0.4 : 0);
       if (pc.ring.visible) { pc.ring.rotation.z += dt * 1.5; pc.ring.material.opacity = 0.6 + 0.3 * Math.sin(time * 5); }
       pc.fig.userData.head.rotation.z = Math.sin(time * 2 + pc.index) * 0.05;
     }

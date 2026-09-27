@@ -80,13 +80,32 @@
 
   <!-- 게임 HUD -->
   <section id="screen-game" class="screen">
-    <div class="era-bar" id="era-bar"><span id="era-name">아기 시절</span><span id="era-turn"></span></div>
+    <!-- 원작 화면 배치: 왼쪽 위 현재 플레이어 패널 / 오른쪽 위 턴·월급날까지 / 왼쪽 명령 메뉴 (docs/ADR.md §12.6) -->
+    <div class="hud-main" id="hud-main">
+      <canvas class="portrait" id="hud-portrait" width="96" height="96"></canvas>
+      <div class="hud-info">
+        <div class="hud-row"><span class="hud-name" id="hud-name"></span><span class="hud-job" id="hud-job"></span></div>
+        <div class="hud-row hud-stats" id="hud-stats"></div>
+        <div class="hud-row"><span class="hud-partner" id="hud-partner"></span><span class="hud-money" id="hud-money"></span></div>
+      </div>
+    </div>
     <div class="players" id="players"></div>
-    <div class="tools">
-      <button class="icon-btn" id="btn-view" title="전체 보기">🗺️</button>
-      <button class="icon-btn" id="btn-log" title="기록/채팅">💬</button>
-      <button class="icon-btn" id="btn-rules" title="규칙">❓</button>
-      <button class="icon-btn" id="btn-mute" title="소리">🔊</button>
+    <div class="turn-box" id="turn-box">
+      <div class="era-name" id="era-name">아기 시절</div>
+      <div class="turn-line"><span id="era-turn"></span></div>
+      <div class="pay-line" id="pay-line"></div>
+    </div>
+    <div class="cmd-menu" id="cmd-menu">
+      <button class="cmd" id="cmd-roulette">🎡 룰렛</button>
+      <button class="cmd" id="cmd-card">🃏 카드</button>
+      <button class="cmd" id="cmd-status">📋 상태</button>
+      <button class="cmd" id="cmd-other">⋯ 기타</button>
+      <div class="other-menu hidden" id="other-menu">
+        <button class="cmd small" id="btn-view">🗺️ 전체 지도</button>
+        <button class="cmd small" id="btn-log">💬 기록·채팅</button>
+        <button class="cmd small" id="btn-rules">❓ 규칙</button>
+        <button class="cmd small" id="btn-mute">🔊 소리</button>
+      </div>
     </div>
     <div class="msgbox" id="msgbox"><div class="msg-name" id="msg-name"></div><div class="msg-text" id="msg-text"></div></div>
     <div class="prompt" id="prompt"></div>
@@ -106,6 +125,7 @@
   <!-- 모달들 -->
   <div class="modal hidden" id="modal-choice"><div class="panel modal-panel"><h2 id="choice-title"></h2><div class="choice-list" id="choice-list"></div></div></div>
   <div class="modal hidden" id="modal-number"><div class="panel modal-panel"><h2>지정 룰렛 — 숫자를 고르세요</h2><div class="num-grid" id="num-grid"></div><button class="btn btn-ghost" id="num-cancel">취소</button></div></div>
+  <div class="modal hidden" id="modal-status"><div class="panel modal-panel status-panel"><h2>상태</h2><div id="status-body"></div><button class="btn btn-main" id="status-close">닫기</button></div></div>
   <div class="banner hidden" id="banner"><div class="banner-inner" id="banner-text"></div></div>
   <div class="modal hidden" id="modal-result"><div class="panel result-panel"><h1>결과 발표</h1><div class="result-cols" id="result-cols"></div><div class="ranking" id="ranking"></div><div class="row"><button class="btn btn-main grow hidden" id="btn-rematch">로비로 돌아가기</button><button class="btn btn-ghost" id="btn-exit">나가기</button></div></div></div>
   <div class="modal hidden" id="modal-rules"><div class="panel modal-panel rules">
@@ -118,7 +138,10 @@
       <li><b>별 칸</b>은 좋은 칸입니다: 옅은 노랑 <b>Lv1</b>(그저 그런) · 주황 <b>Lv2</b>(좋은 효과 2배) · 빛나는 <b>Lv3</b>(아주 좋은 호화 이벤트).</li>
       <li><b>물방울 칸</b>(아슬아슬)은 능력치가 크게 변하는 룰렛을 돌리고, <b>유령 칸</b>(대위기)은 큰 손해 + 운세 −1 입니다. 유령 칸은 보험 카드로 막을 수 있습니다.</li>
       <li>월급날 칸은 <b>지나가기만 해도</b> 월급을 받습니다. STOP 칸에서는 반드시 멈춥니다.</li>
-      <li>고등학생부터 나오는 하트 칸에서 애정을 쌓고 결혼 STOP에서 결혼! 아기 칸에서 아이가 태어납니다. 결혼·출산 시 다른 플레이어가 축하금을 냅니다.</li>
+      <li><b>갈림길</b>에서 <b>💗 연애 길</b>(하트 칸이 많음) 또는 <b>💼 커리어 길</b>(랭크업 찬스·월급날이 많음, 고등학생 때는 📖 공부 길)을 고릅니다. 연애 길을 가지 않으면 인연이 잘 생기지 않습니다.</li>
+      <li>고등학생이 되면 <b>관심 있는 사람</b>을 고릅니다. 하트 칸에서 데이트하면 <b>호감도</b>가 오르고(★이 많을수록 잘 안 오르고, 성격이 내 강한 능력치와 맞으면 잘 오름), 어른이 되어 호감도가 60 이상이면 <b>프러포즈</b>할 수 있습니다. 무지개색 <b>운명의 하트 칸</b>에서는 ★4~5 상대를 만납니다.</li>
+      <li><b>여행 칸</b>에서는 서브맵 섬(🌾 시골 마을 · 🎰 일확천금 섬 · ⛩️ 신들의 섬)으로 여행을 떠날 수 있고, 돌아올 때는 6칸 앞으로 지름길!</li>
+      <li>결혼 STOP에서는 상대에게 프러포즈(상대가 없으면 즉석 소개팅)! 아기 칸에서 아이가 태어납니다. 결혼·출산 시 다른 플레이어가 축하금을 냅니다.</li>
       <li>돈이 부족하면 자동으로 <b>약속어음</b>(1장 1000만원)을 받고, 결과 발표 때 1장당 1200만원을 갚습니다.</li>
       <li>카드는 룰렛 전에 1턴 1장 사용할 수 있습니다. 보험 카드는 유령 칸에서 자동 발동합니다.</li>
       <li>GOAL 후 <b>결과 발표</b>: 현금 + 보물 감정 + 집 감정 + 자녀 효도 + 골 순위 보너스 + 특별상 − 약속어음. 총자산 1위가 승리!</li>

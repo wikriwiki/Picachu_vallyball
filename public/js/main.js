@@ -5,7 +5,8 @@ import { Net } from './net.js';
 import { sfx } from './sfx.js';
 import { buildAvatar } from './avatar.js';
 import { formatMoney, salaryOf } from '/shared/engine.js';
-import { ERAS, jobById, gradeOf, FORTUNES, CARDS, STAT_NAMES } from '/shared/data.js';
+import { ERAS, jobById, gradeOf, FORTUNES, CARDS, STAT_NAMES, SUBMAPS, PERSONALITY_NAMES } from '/shared/data.js';
+import { BOARD, stepsToPayday } from '/shared/board.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -400,12 +401,29 @@ async function playEvents(events, finalState) {
         await wait(220);
         break;
       }
-      case 'love':
-        vp(e.pid).love = e.value;
-        floater(e.pid, e.delta > 0 ? '💗 애정 +1' : '💔 애정 -1', e.delta > 0 ? 'plus' : 'minus');
+      case 'partner': {
+        const p = vp(e.pid);
+        p.partner = { id: e.partner, affinity: e.affinity };
+        floater(e.pid, `💘 ${e.name} ${'★'.repeat(e.stars)}`, 'plus');
         renderHUD(app.view);
-        await wait(220);
+        await wait(500);
         break;
+      }
+      case 'affinity': {
+        const p = vp(e.pid);
+        if (p.partner) p.partner.affinity = e.value;
+        floater(e.pid, `💗 호감도 ${e.delta > 0 ? '+' : ''}${e.delta}`, e.delta > 0 ? 'plus' : 'minus');
+        renderHUD(app.view);
+        await wait(300);
+        break;
+      }
+      case 'junction': {
+        W.focus(e.pid);
+        if (e.pid === app.me) setMsg('갈림길이다! 어느 길로 갈지 고르세요.', 'info', e.pid);
+        else setMsg('갈림길에서 고민 중...', 'info', e.pid);
+        await wait(300);
+        break;
+      }
       case 'card': {
         const p = vp(e.pid);
         if (e.gained) { p.cards.push(e.card); floater(e.pid, `🃏 ${CARDS[e.card].name}`, 'info'); sfx.card(); }
@@ -469,7 +487,8 @@ async function playEvents(events, finalState) {
         vp(e.pid).tile = e.tile;
         W.focus(e.pid);
         W.syncPieces(app.view, true);
-        await W.warp(e.pid, e.tile, idx);
+        if (e.fly) sfx.lucky();
+        await W.warp(e.pid, e.tile, idx, !!e.fly);
         break;
       }
       case 'goal':
@@ -497,20 +516,57 @@ async function playEvents(events, finalState) {
 // ------------------------------------------------------------------
 // HUD
 // ------------------------------------------------------------------
+// 원작 화면 배치 HUD (docs/ADR.md §12.6)
+function drawFace(canvas, av = {}) {
+  const g = canvas.getContext('2d');
+  const w = canvas.width;
+  g.clearRect(0, 0, w, w);
+  g.fillStyle = '#d0ebff'; g.fillRect(0, 0, w, w);
+  g.fillStyle = av.shirt || '#ff6b6b'; g.beginPath(); g.ellipse(w / 2, w * 1.05, w * 0.42, w * 0.3, 0, 0, 7); g.fill();
+  g.fillStyle = av.skin || '#f5d0b0'; g.beginPath(); g.arc(w / 2, w * 0.5, w * 0.28, 0, 7); g.fill();
+  g.fillStyle = av.hair || '#4a3020'; g.beginPath(); g.arc(w / 2, w * 0.44, w * 0.3, Math.PI * 1.02, Math.PI * 1.98); g.fill();
+  if ((av.hairStyle | 0) === 2) { g.fillRect(w * 0.2, w * 0.42, w * 0.1, w * 0.36); g.fillRect(w * 0.7, w * 0.42, w * 0.1, w * 0.36); }
+  if ((av.hairStyle | 0) === 3) { g.beginPath(); g.arc(w / 2, w * 0.12, w * 0.1, 0, 7); g.fill(); }
+  g.fillStyle = '#2a2238';
+  const eh = (av.face | 0) === 1 ? 2 : 6;
+  g.fillRect(w * 0.38 - 3, w * 0.52 - eh / 2, 6, eh); g.fillRect(w * 0.62 - 3, w * 0.52 - eh / 2, 6, eh);
+  if ((av.face | 0) === 2) { g.strokeStyle = '#2a2238'; g.lineWidth = 2; g.strokeRect(w * 0.3, w * 0.47, w * 0.16, w * 0.1); g.strokeRect(w * 0.54, w * 0.47, w * 0.16, w * 0.1); }
+  g.fillStyle = '#ff8fab'; g.beginPath(); g.arc(w * 0.32, w * 0.62, 4, 0, 7); g.arc(w * 0.68, w * 0.62, 4, 0, 7); g.fill();
+}
+
 function jobLabel(p, era) {
   if (p.job) {
     const j = jobById(p.job);
-    return `${j.icon} ${j.name} · ${j.ranks[p.rank].name} (${formatMoney(j.ranks[p.rank].salary)})`;
+    return `${j.icon} ${j.ranks[p.rank].name}`;
   }
-  return ['👶 아기', '🎒 초등학생', '🏫 중학생', '🎓 고등학생', '🧑 백수', '🧑 백수', '👴 은퇴'][era] || '';
+  return ['👶 아기', '🎒 초등학생', '🏫 중학생', '🎓 고등학생', '🧑 구직 중', '🧑 구직 중', '👴 은퇴'][era] || '';
+}
+function partnerLabel(s, p) {
+  if (p.spouse) return `💍 ${p.spouse}` + (p.kids.length ? ` 👶×${p.kids.length}` : '');
+  if (!p.partner || !s.partners) return '';
+  const c = s.partners.find((x) => x.id === p.partner.id);
+  return c ? `💗 ${c.name} ${'★'.repeat(c.stars)} ${p.partner.affinity}%` : '';
+}
+function focusPlayer(s) {
+  const id = s.pending ? s.pending.playerId : app.me;
+  return s.players.find((p) => p.id === id) || s.players.find((p) => p.id === app.me) || s.players[0];
 }
 
 function renderHUD(s) {
   if (!s) return;
   const era = ERAS[s.era];
+  const f = focusPlayer(s);
   $('era-name').textContent = era.name;
-  $('era-turn').textContent = era.turns ? `${Math.min(s.round + 1, era.turns)} / ${era.turns} 턴` : '골을 향해!';
-  $('era-bar').style.borderColor = '#' + era.color.toString(16).padStart(6, '0');
+  $('era-turn').textContent = era.turns ? `턴 ${Math.min(s.round + 1, era.turns)}/${era.turns}` : '골을 향해!';
+  const tile = BOARD.tiles[f.tile];
+  const pay = stepsToPayday(f.tile);
+  $('pay-line').textContent = tile && tile.era < 0 ? `✈️ ${SUBMAPS[tile.sub].name} 여행 중` : pay != null ? `${s.era < 4 ? '용돈날' : s.era === 6 ? '연금날' : '월급날'}까지 ${pay}칸` : '';
+  drawFace($('hud-portrait'), f.avatar);
+  $('hud-name').textContent = f.name + (f.id === app.me ? ' (나)' : '');
+  $('hud-job').textContent = jobLabel(f, s.era);
+  $('hud-stats').innerHTML = `<span>지력<b>${gradeOf(f.stats.int)}</b></span><span>체력<b>${gradeOf(f.stats.phy)}</b></span><span>센스<b>${gradeOf(f.stats.sen)}</b></span><span>운세<b>${FORTUNES[f.fortune]}</b></span>`;
+  $('hud-partner').textContent = partnerLabel(s, f);
+  $('hud-money').textContent = formatMoney(f.money) + (f.notes ? ` 📄×${f.notes}` : '');
   renderPlayers(s);
 }
 
@@ -518,21 +574,40 @@ function renderPlayers(s = app.view) {
   if (!s) return;
   const box = $('players');
   const members = app.room ? app.room.members : [];
+  const f = focusPlayer(s);
   box.innerHTML = s.players.map((p) => {
     const mem = members.find((m) => m.id === p.id);
     const off = mem && !mem.connected && !p.cpu;
     const active = s.pending && s.pending.playerId === p.id;
-    const hearts = p.spouse ? `💍${esc(p.spouse)}` : p.love ? '💗'.repeat(Math.min(p.love, 5)) : '';
-    const kids = p.kids.length ? ` 👶×${p.kids.length}` : '';
-    const extra = [hearts + kids, p.cards.length ? `🃏${p.cards.length}` : '', p.treasures.length ? `💎${p.treasures.length}` : '', p.houses.length ? `🏠${p.houses.length}` : '', p.notes ? `📄×${p.notes}` : '', p.finished ? '🏁' : '']
+    const extra = [partnerLabel(s, p), p.cards.length ? `🃏${p.cards.length}` : '', p.treasures.length ? `💎${p.treasures.length}` : '', p.houses.length ? `🏠${p.houses.length}` : '', p.notes ? `📄×${p.notes}` : '', p.finished ? '🏁' : '', BOARD.tiles[p.tile] && BOARD.tiles[p.tile].era < 0 ? '✈️' : '']
       .filter(Boolean).join(' ');
-    return `<div class="pcard${active ? ' active' : ''}">
+    return `<div class="pcard${active ? ' active' : ''}${p.id === f.id ? ' is-main' : ''}">
       <div class="top"><div class="dot" style="background:${esc(p.avatar.shirt || '#999')}"></div><div class="nm">${esc(p.name)} ${p.id === app.me ? '<span class="me">나</span>' : ''}${off ? '<span class="off">오프라인</span>' : ''}${p.cpu ? '<span class="off">CPU</span>' : ''}</div><div class="money${p.money < 0 ? ' neg' : ''}">${formatMoney(p.money)}</div></div>
       <div class="job">${esc(jobLabel(p, s.era))}</div>
-      <div class="stats"><span class="st">지력 <b>${gradeOf(p.stats.int)}</b></span><span class="st">체력 <b>${gradeOf(p.stats.phy)}</b></span><span class="st">센스 <b>${gradeOf(p.stats.sen)}</b></span><span class="st">운세 <b>${FORTUNES[p.fortune]}</b></span></div>
-      ${extra ? `<div class="extra">${extra}</div>` : ''}
+      ${extra ? `<div class="extra">${esc(extra)}</div>` : ''}
     </div>`;
   }).join('');
+}
+
+function renderStatus() {
+  const s = app.state;
+  if (!s) return;
+  $('status-body').innerHTML = '<div class="status-grid">' + s.players.map((p) => {
+    const c = p.partner && s.partners ? s.partners.find((x) => x.id === p.partner.id) : null;
+    const j = p.job ? jobById(p.job) : null;
+    const stat = (k) => `${STAT_NAMES[k]} <b>${gradeOf(p.stats[k])}</b> (${p.stats[k]})`;
+    return `<div class="status-card"><h3>${esc(p.name)}</h3>
+      💰 ${formatMoney(p.money)}${p.notes ? ` · 약속어음 ${p.notes}장` : ''}<br>
+      ${j ? `${j.icon} ${esc(j.name)} · ${esc(j.ranks[p.rank].name)} (월급 ${formatMoney(j.ranks[p.rank].salary)})` : esc(jobLabel(p, s.era))}<br>
+      ${stat('int')} · ${stat('phy')} · ${stat('sen')}<br>
+      운세 <b>${FORTUNES[p.fortune]}</b><br>
+      ${p.spouse ? `💍 배우자: ${esc(p.spouse)}` : c ? `💗 ${esc(c.name)} (${esc(c.job)}, ${'★'.repeat(c.stars)}, ${PERSONALITY_NAMES[c.personality]})<div class="bar"><i style="width:${p.partner.affinity}%"></i></div>` : '💭 관심 있는 사람 없음'}
+      ${p.kids.length ? `<br>👶 자녀: ${p.kids.map(esc).join(', ')}` : ''}
+      ${p.houses.length ? `<br>🏠 ${p.houses.map((h) => esc(h.name)).join(', ')}` : ''}
+      ${p.treasures.length ? `<br>💎 ${p.treasures.map((t) => esc(t.name)).join(', ')}` : ''}
+      ${p.cards.length ? `<br>🃏 ${p.cards.map((k) => esc(CARDS[k].name)).join(', ')}` : ''}
+    </div>`;
+  }).join('') + '</div>';
 }
 
 function addLog(html) {
@@ -677,6 +752,16 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') releaseCharge(e);
 });
+
+// 명령 메뉴 (원작: 룰렛 / 카드 / 상태 / 기타)
+const cmdR = $('cmd-roulette');
+cmdR.addEventListener('pointerdown', startCharge);
+cmdR.addEventListener('pointerup', releaseCharge);
+cmdR.addEventListener('pointerleave', releaseCharge);
+$('cmd-card').onclick = () => { $('hand').classList.toggle('hidden'); $('cmd-card').classList.toggle('on', !$('hand').classList.contains('hidden')); };
+$('cmd-status').onclick = () => { renderStatus(); $('modal-status').classList.remove('hidden'); };
+$('status-close').onclick = () => $('modal-status').classList.add('hidden');
+$('cmd-other').onclick = () => $('other-menu').classList.toggle('hidden');
 
 // 툴바
 let overview = false;

@@ -21,16 +21,62 @@ export const FORTUNE_START = 3;
 
 export const STAT_NAMES = { int: '지력', phy: '체력', sen: '센스' };
 
-// 시대(스테이지). turns=null 은 턴 제한 없음(골까지).
+// 시대(스테이지). turns=null 은 턴 제한 없음(골까지). path: 경로 구성 (docs/ADR.md §2, §12.1)
+//   { main: n, fixed: { 칸번호: 'stop:marriage' | 'travel:countryside' ... } }  일반 길 n칸 (시대 첫 part 는 START, 마지막 part 는 END/GOAL 포함)
+//   { branch: L, a: 'love', b: 'career' }  분기: a 길 L칸(레인 위), b 길 L+4칸(우회로)
 export const ERAS = [
-  { id: 'baby', name: '아기 시절', turns: 2, len: 14, allowance: 0, color: 0xffc8dd, ground: 0xbde0a8 },
-  { id: 'elem', name: '초등학생 시절', turns: 4, len: 28, allowance: 20, color: 0xffe066, ground: 0x9ad07a },
-  { id: 'middle', name: '중학생 시절', turns: 4, len: 28, allowance: 40, color: 0x74c0fc, ground: 0x86c46d },
-  { id: 'high', name: '고등학생 시절', turns: 4, len: 28, allowance: 60, color: 0x9775fa, ground: 0x7ab862 },
-  { id: 'adult1', name: '어른 시절 전반', turns: 7, len: 46, allowance: 0, color: 0xff8787, ground: 0x8cc06a },
-  { id: 'adult2', name: '어른 시절 후반', turns: 7, len: 46, allowance: 0, color: 0xffa94d, ground: 0x9cc46e },
-  { id: 'final', name: '마지막 시절', turns: null, len: 32, allowance: 0, color: 0xc0a0ff, ground: 0xb5c98a },
+  { id: 'baby', name: '아기 시절', turns: 2, allowance: 0, payEvery: 0, color: 0xffc8dd, ground: 0xbde0a8,
+    path: [{ main: 14 }] },
+  { id: 'elem', name: '초등학생 시절', turns: 4, allowance: 20, payEvery: 7, color: 0xffe066, ground: 0x9ad07a,
+    path: [{ main: 28 }] },
+  { id: 'middle', name: '중학생 시절', turns: 4, allowance: 40, payEvery: 7, color: 0x74c0fc, ground: 0x86c46d,
+    path: [{ main: 28 }] },
+  { id: 'high', name: '고등학생 시절', turns: 4, allowance: 60, payEvery: 7, color: 0x9775fa, ground: 0x7ab862,
+    path: [{ main: 8 }, { branch: 10, a: 'love', b: 'study' }, { main: 10 }] },
+  { id: 'adult1', name: '어른 시절 전반', turns: 15, allowance: 0, payEvery: 18, color: 0xff8787, ground: 0x8cc06a,
+    path: [{ main: 12 }, { branch: 14, a: 'love', b: 'career' }, { main: 18, fixed: { 2: 'stop:marriage', 9: 'travel:countryside' } }, { branch: 12, a: 'love', b: 'career' }, { main: 22 }] },
+  { id: 'adult2', name: '어른 시절 후반', turns: 15, allowance: 0, payEvery: 18, color: 0xffa94d, ground: 0x9cc46e,
+    path: [{ main: 14 }, { branch: 12, a: 'love', b: 'career' }, { main: 20, fixed: { 4: 'stop:house', 11: 'travel:casino' } }, { branch: 12, a: 'love', b: 'career' }, { main: 22 }] },
+  { id: 'final', name: '마지막 시절', turns: null, allowance: 0, payEvery: 10, color: 0xc0a0ff, ground: 0xb5c98a,
+    path: [{ main: 34, fixed: { 10: 'travel:shrine' } }] },
 ];
+export const ROUTE_NAMES = { main: '일반 길', love: '💗 연애 길', career: '💼 커리어 길', study: '📖 공부 길' };
+export const ROUTE_DESC = {
+  love: '하트 칸이 많아 인연을 만들기 좋다',
+  career: '랭크업 찬스와 월급날이 많다',
+  study: '별 칸과 카드 칸이 많아 능력치를 키우기 좋다',
+};
+
+// 서브맵 (docs/ADR.md §6.12) — 10칸 한 줄
+export const SUBMAPS = {
+  countryside: { name: '🌾 시골 마을', tiles: ['substart', 'rest', 'farm', 'star1', 'rest', 'farm', 'star2', 'rest', 'star3', 'return'] },
+  casino: { name: '🎰 일확천금 섬', tiles: ['substart', 'bet', 'dig', 'bet', 'ghost', 'dig', 'bet', 'star3', 'jackpot', 'return'] },
+  shrine: { name: '⛩️ 신들의 섬', tiles: ['substart', 'pray', 'star1', 'pray', 'omikuji', 'star2', 'pray', 'omikuji', 'star3', 'return'] },
+};
+export const TRAVEL_SHORTCUT = 6;
+
+// 연애 상대 후보 (docs/ADR.md §6.4) — ★ 등급은 게임 시작 시 무작위
+export const PARTNERS = [
+  { id: 'jiwoo', name: '지우', job: '연구원', personality: 'int', color: '#74c0fc' },
+  { id: 'sua', name: '수아', job: '변호사', personality: 'int', color: '#b197fc' },
+  { id: 'junho', name: '준호', job: '의사', personality: 'int', color: '#63e6be' },
+  { id: 'haeun', name: '하은', job: '교수', personality: 'int', color: '#91a7ff' },
+  { id: 'minjun', name: '민준', job: '소방관', personality: 'phy', color: '#ff8787' },
+  { id: 'siwoo', name: '시우', job: '축구 선수', personality: 'phy', color: '#ffa94d' },
+  { id: 'daon', name: '다온', job: '요가 강사', personality: 'phy', color: '#8ce99a' },
+  { id: 'taeo', name: '태오', job: '경찰관', personality: 'phy', color: '#4dabf7' },
+  { id: 'seoyeon', name: '서연', job: '간호사', personality: 'sen', color: '#ffa8a8' },
+  { id: 'harin', name: '하린', job: '가수', personality: 'sen', color: '#f783ac' },
+  { id: 'yerin', name: '예린', job: '화가', personality: 'sen', color: '#e599f7' },
+  { id: 'doyun', name: '도윤', job: '셰프', personality: 'sen', color: '#ffd43b' },
+];
+export const STAR_WEIGHTS = [30, 30, 25, 10, 5]; // ★1~★5
+export const STAR_GAIN = [1.3, 1.1, 1.0, 0.8, 0.6];
+export const DATE_BASE = 15;
+export const PROPOSE_AT = 60;
+export const PERSONALITY_NAMES = { int: '지력형', phy: '체력형', sen: '센스형' };
+export const PERSONALITY_CARD = { int: 'study', phy: 'gym', sen: 'artclass' };
+
 export const ADULT_ERA = 4;
 export const FINAL_ERA = 6;
 
@@ -44,6 +90,8 @@ export const TILE_INFO = {
   love: { name: '하트 칸', color: 0xff7eb6 },
   hiyari: { name: '물방울 칸 (아슬아슬)', color: 0x7cc7ff },
   ghost: { name: '유령 칸 (대위기)', color: 0x6c4fc4 },
+  destiny: { name: '운명의 하트 칸', color: 0xff9ecf },
+  travel: { name: '여행 칸', color: 0x4dd4f0 },
   choice: { name: '선택 칸', color: 0x8ce0c4 },
   card: { name: '카드 칸', color: 0x5c9dff },
   challenge: { name: '랭크업 찬스', color: 0x22b8cf },
@@ -51,6 +99,15 @@ export const TILE_INFO = {
   stop: { name: 'STOP', color: 0xe03131 },
   end: { name: '다음 시대로', color: 0xffffff },
   goal: { name: 'GOAL', color: 0xffd700 },
+  substart: { name: '서브맵 출발', color: 0xffffff },
+  rest: { name: '휴식 칸', color: 0xa9e34b },
+  farm: { name: '수확 칸', color: 0xffc078 },
+  bet: { name: '베팅 칸', color: 0xf03e3e },
+  dig: { name: '보물 캐기 칸', color: 0xc0915e },
+  jackpot: { name: '잭팟 칸', color: 0xfab005 },
+  pray: { name: '기도 칸', color: 0xe8590c },
+  omikuji: { name: '운세 뽑기 칸', color: 0xfff0f6 },
+  return: { name: '귀환 칸', color: 0x4dd4f0 },
 };
 
 // 직업. type: 'stat'=능력치 충족 시 월급날 자동 승진, 'spin'=랭크업 찬스 칸에서 룰렛 성공 시 승진, 'free'=프리랜서

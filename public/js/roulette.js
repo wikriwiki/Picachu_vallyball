@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 3D 룰렛 (1~10) — 별도 캔버스, 각속도 모션 블러 셰이더
 import * as THREE from 'three';
 import { rouletteMaterial, toonMaterial } from './shaders.js';

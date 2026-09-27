@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // Three.js 월드: 섬 지형, 보드, 말, 카메라, 후처리
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';

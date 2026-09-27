@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 인생게임 룰 엔진 (서버 권위, 순수 JS / JSON 직렬화 가능한 상태)
 import {
   ERAS, ADULT_ERA, FINAL_ERA, JOBS, jobById, meetsReq, gradeIndex, CLUBS, CARDS, CARD_POOL, HAND_MAX,

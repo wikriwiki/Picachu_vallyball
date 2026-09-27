@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 커스텀 GLSL 셰이더 모음
 import * as THREE from 'three';
 

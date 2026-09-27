@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 멀티플레이 통합 테스트: 실제 서버 + WebSocket 클라이언트 2명 + CPU 1명으로 끝까지 플레이, 중간 재접속 포함
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';

@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 엔진 시뮬레이션 테스트: CPU끼리 여러 시드로 끝까지 플레이
 import assert from 'node:assert/strict';
 import { createGame, applyAction, cpuAction, publicState } from '../shared/engine.js';

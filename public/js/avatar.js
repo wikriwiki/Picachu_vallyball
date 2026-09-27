@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 아바타 (치비 캐릭터) + 자동차 말 생성
 import * as THREE from 'three';
 import { toonMaterial, outlineMaterial } from './shaders.js';

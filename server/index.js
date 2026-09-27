@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // HTTP 정적 서버 + WebSocket 게임 서버
 import http from 'node:http';
 import fs from 'node:fs';

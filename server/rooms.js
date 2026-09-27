@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 방(로비) 관리 + 게임 진행
 import crypto from 'node:crypto';
 import { createGame, applyAction, cpuAction, publicState } from '../shared/engine.js';

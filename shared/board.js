@@ -1,3 +1,4 @@
+// 해당 코드와 관련된 작업을 할 때는 adr md파일(docs/ADR.md)을 참고한 뒤 작업하시오
 // 보드 구성 (서버·클라이언트 공통, 결정적 생성)
 import { ERAS } from './data.js';
 

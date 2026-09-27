@@ -1,16 +1,19 @@
 {
-  "name": "picachu-holdem-volleyball",
+  "name": "online-game-of-life",
   "version": "1.0.0",
   "private": true,
-  "description": "Web game combining Texas Hold'em and Pikachu Volleyball with a shared fight-money economy.",
+  "type": "module",
+  "description": "인생게임 for Nintendo Switch 스타일 온라인 멀티플레이 보드게임 (Three.js + GLSL + WebSocket)",
   "scripts": {
-    "test": "node test/test_hand.js && node test/test_holdem.js && node test/test_volley.js && node test/test_economy.js && node test/test_integration.js",
-    "test:dom": "node test/test_dom.js && node test/test_dom_bettor.js",
-    "test:all": "npm test && npm run test:dom",
+    "start": "node server/index.js",
+    "test": "node test/engine.test.js && node test/multiplayer.test.js",
     "shots": "node test/screenshot.js"
   },
-  "devDependencies": {
-    "jsdom": "^24.0.0",
-    "puppeteer": "^22.0.0"
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "0.180.0",
+    "ws": "^8.18.0"
   }
 }

@@ -9,8 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx src/server/main.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20"

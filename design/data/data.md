@@ -48,4 +48,4 @@ status: implemented
 - 공개 상수 객체를 바꾸려 하면 타입 검사에서 오류가 난다 (`readonly`).
 
 ## 참조
-- [docs/ADR.md](../../docs/ADR.md): 기존 규칙·수치 명세 (§2~§12). 자식 leaf 로 옮기는 원본.
+없음. (옛 `docs/ADR.md` 의 내용은 자식 leaf 로 모두 옮겨짐)

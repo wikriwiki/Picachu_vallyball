@@ -87,6 +87,16 @@ export function createRoulette(canvas: HTMLCanvasElement, sounds?: { tick(): voi
   let lastSeg = -1;
   let anim: { start: number; end: number; t0: number; dur: number; k: number; resolve: () => void } | null = null;
   const clock = new THREE.Clock();
+  const finish = () => {
+    if (!anim) return;
+    angle = anim.end;
+    mode = 'stopped';
+    mat.uniforms.uHighlight.value = anim.k;
+    const done = anim.resolve;
+    anim = null;
+    sounds?.ding();
+    done();
+  };
 
   const resize = () => {
     const w = canvas.clientWidth || 200; const h = canvas.clientHeight || 200;
@@ -106,14 +116,7 @@ export function createRoulette(canvas: HTMLCanvasElement, sounds?: { tick(): voi
     else if (mode === 'decel' && anim) {
       const u = Math.min(1, (t - anim.t0) / anim.dur);
       angle = anim.start + (anim.end - anim.start) * (1 - Math.pow(1 - u, 3));
-      if (u >= 1) {
-        mode = 'stopped';
-        mat.uniforms.uHighlight.value = anim.k;
-        const done = anim.resolve;
-        anim = null;
-        sounds?.ding();
-        done();
-      }
+      if (u >= 1) finish();
     }
     const w = Math.abs(angle - prev) / Math.max(dt, 1e-3);
     mat.uniforms.uBlur.value = Math.min(0.9, w * 0.018);
@@ -138,7 +141,10 @@ export function createRoulette(canvas: HTMLCanvasElement, sounds?: { tick(): voi
       mat.uniforms.uHighlight.value = -1;
       mode = 'decel';
       return new Promise((resolve) => {
-        anim = { start: angle, end: stopAngle(value, angle, turns, jitter), t0: clock.elapsedTime, dur: quick ? 0.9 : 2.4, k: value - 1, resolve };
+        const dur = quick ? 0.9 : 2.4;
+        const mine = { start: angle, end: stopAngle(value, angle, turns, jitter), t0: clock.elapsedTime, dur, k: value - 1, resolve };
+        anim = mine;
+        setTimeout(() => { if (anim === mine) finish(); }, dur * 1000 + 200);
       });
     },
   };

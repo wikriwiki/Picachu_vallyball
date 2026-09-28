@@ -52,6 +52,8 @@ status: implemented
 7. `project(p)`: p 를 카메라로 투영해 z > 1 이면 null, 아니면 `((x+1)/2·캔버스 폭, (1−y)/2·캔버스 높이)`.
 8. `lookAt(p)` 는 follow 를 해제하고 목표점을 p 로. `setDistance(g)` 는 `distGoal = g`. `setBlur(v)` 는 `FinalShader` 의 `uBlur`.
 
+9. 안전장치: 창이 가려져 프레임이 멈춰도 연출이 끝나도록, `tween(ms, fn)` 은 `ms + 200` ms 타이머도 건다. 타이머가 먼저 울리면 `fn(1)` 을 적용하고 목록에서 빼고 resolve 한다 (프레임이 먼저 끝냈으면 타이머는 아무것도 하지 않는다).
+
 ## 경계 조건
 - follow 함수가 null 을 돌려주면 목표점을 바꾸지 않는다.
 - 같은 프레임에 여러 트윈이 끝나도 모두 resolve 된다.

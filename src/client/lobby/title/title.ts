@@ -3,7 +3,8 @@
  * @pyramid-parent    design/client/lobby/lobby.md
  * @pyramid-on-change 1) design/client/lobby/title/title.md 먼저 수정 2) 이 코드 수정 3) design/client/lobby/lobby.md 「통합 방식」 영향 검토
  */
-import { AVATAR_DEFAULT, AVATAR_OPTIONS, type Avatar, type Mode } from '../../../data/data';
+import { AVATAR_DEFAULT, AVATAR_OPTIONS, type Avatar } from '../../../data/data';
+import type { Mode } from '../../../engine/engine';
 import type { AvatarPreview } from '../../../view/view';
 import type { ClientCtx } from '../../ctx';
 import type { ConnStatus } from '../../connection/connection';

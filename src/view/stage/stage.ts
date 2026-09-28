@@ -116,7 +116,17 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
 
   return {
     scene, camera, target, orbit,
-    tween: (ms, fn) => new Promise((resolve) => { tweens.push({ t0: clock.elapsedTime, dur: Math.max(0.001, ms / 1000), fn, resolve }); }),
+    tween: (ms, fn) => new Promise((resolve) => {
+      const tw = { t0: clock.elapsedTime, dur: Math.max(0.001, ms / 1000), fn, resolve };
+      tweens.push(tw);
+      setTimeout(() => {
+        const i = tweens.indexOf(tw);
+        if (i < 0) return;
+        tweens.splice(i, 1);
+        fn(1);
+        resolve();
+      }, ms + 200);
+    }),
     onFrame: (fn) => { frames.push(fn); },
     follow: (fn) => { followFn = fn; },
     lookAt: (p) => { followFn = null; goal.copy(p); },

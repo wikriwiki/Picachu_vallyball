@@ -3,7 +3,7 @@ pyramid: capstone
 id: capstone
 title: 인생게임 온라인
 parent: none
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**
@@ -36,7 +36,7 @@ status: designed
 - 라이브러리: 3D 는 `three`, 실시간 통신은 `ws`. 그 외 런타임 의존성은 추가 전에 설계에 적는다.
 - 빌드 [제안]: 클라이언트는 Vite 로 번들, 서버는 `tsx` 로 실행하고 `tsc` 로 타입 검사
 - 코드 위치 규약: 설계 경로를 그대로 따른다. `design/a/b/b.md` → `src/a/b/b.ts`. 테스트는 같은 폴더의 `b.test.ts`. 예외: Vite 진입 HTML 은 프로젝트 루트 `index.html` 이며, 이 파일은 클라이언트의 화면 골격 leaf 가 정의한다. 설정 파일(`package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `render.yaml`)은 이 capstone 이 근거다.
-- 테스트 도구 [제안]: Vitest (DOM 이 필요한 테스트는 jsdom 환경). E2E 는 Playwright
+- 테스트 도구: Vitest (DOM 이 필요한 테스트는 jsdom 환경). 수용 기준 1·2 는 `src/capstone.test.ts` (실제 서버 + WebSocket 두 개), 3·4 는 `src/engine/engine.test.ts`, 5(모바일 폭)는 브라우저에서 수동 확인
 - 개발 실행: `npm run dev` = 서버(tsx, 포트 3000) + Vite 개발 서버(포트 5173, `/ws` 를 3000 으로 프록시). 배포: `npm run build` 후 `npm start` 가 빌드된 클라이언트(`dist/client`)를 제공한다.
 - 결정성: 룰 엔진은 순수 함수이며, 난수는 시드를 받은 난수 생성기로만 만든다. 같은 시드와 같은 조작 순서면 결과가 같다.
 - 서버 권위: 게임 상태의 판정은 서버에서 룰 엔진으로만 한다. 클라이언트는 받은 상태를 보여 주고 조작만 보낸다.

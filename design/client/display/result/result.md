@@ -22,7 +22,7 @@ status: designed
 - 구현 위치: `src/client/display/result/result.ts`, 테스트 `src/client/display/result/result.test.ts` (jsdom, 가짜 sleep)
 - 공개 API:
   ```ts
-  export function createResult(ctx: ClientCtx, deps?: { sleep?: (ms: number) => Promise<void>; location?: { pathname: string; assign(url: string): void } }): {
+  export function createResult(ctx: ClientCtx, sound: Sound, deps?: { sleep?: (ms: number) => Promise<void>; location?: { pathname: string; assign(url: string): void } }): {
     show(s: PublicState): Promise<void>;
     hide(): void;
   };

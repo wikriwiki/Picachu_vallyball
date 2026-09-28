@@ -48,7 +48,7 @@ status: designed
   - 재생: `createPlayback(ctx)`. `enqueue(state, events)` 로 받은 상태를 차례대로 재생한다. 처음 상태가 오면 3D 화면을 만든다.
   - 표시: `createDisplay(ctx)`. HUD·목록·메시지·효과음·결과 발표를 그리는 함수들을 공개한다. 재생과 입력이 이를 호출한다.
   - 입력: `initControls(ctx)`. 조작 가능할 때만 조작 메시지를 보내고, `updateControls()` 를 공개한다.
-  - 공통 `ctx`: `ClientCtx = { doc, shell, store, connection, display, lobby, controls, getView(): View | null, ensureView(): Promise<View> }`. 자식끼리는 `ctx` 로만 서로를 부른다. `ClientCtx` 타입은 이 node 가 소유하는 `src/client/ctx.ts` 에 둔다 (타입만 담고, 자식은 `import type` 으로만 쓴다). `lobby`·`controls` 는 나중에 만들어지므로 만들어지기 전에는 부르지 않는다.
+  - 공통 `ctx`: `ClientCtx = { doc, shell, store, connection, display, lobby, controls, getView(): View | null, ensureView(): Promise<View> }`. 자식끼리는 `ctx` 로만 서로를 부른다. `ClientCtx` 타입은 이 node 가 소유하는 `src/client/ctx.ts` 에 둔다. 자식 테스트가 함께 쓰는 도구(실제 `index.html` 로 jsdom 문서 만들기, 가짜 ctx·view)는 이 node 가 소유하는 `src/client/testkit.ts` 에 두며 테스트에서만 import 한다 (타입만 담고, 자식은 `import type` 으로만 쓴다). `lobby`·`controls` 는 나중에 만들어지므로 만들어지기 전에는 부르지 않는다.
 - 조립: 구현 위치 `src/client/client.ts`.
   1. 화면 골격 → 상태 저장소 → 연결(아직 connect 하지 않음) → 표시 → 재생 → 로비 → 입력 순서로 만든다.
   2. `ensureView()` 는 처음 호출될 때 3D 화면 모듈을 동적 import 해 `createView(canvas, rouletteCanvas, { tick: sound.tick, ding: sound.ding })` 로 만들고, 이후에는 같은 인스턴스를 돌려준다.

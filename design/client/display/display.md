@@ -60,7 +60,7 @@ status: designed
   - 기록: `createLog(ctx): { add(html), toggle(), isOpen() }`. 채팅 폼 제출 시 `{ type: 'chat', text }` 를 보낸다.
   - 알림: `createNotice(ctx): { message, floater, banner, toast }`. 떠오르는 글자 위치는 `ctx.getView()?.project(pid, 3.4)` 로 얻는다.
   - 효과음: `createSound(deps?): Sound`. `Sound` 는 `muted`, `toggle(): boolean`, `unlock()`, `tick`, `hop`, `ding`, `money`, `lose`, `lucky`, `love`, `card`, `era`, `fanfare`, `turn` 을 가진다.
-  - 결과 발표: `createResult(ctx): { show(s): Promise<void>, hide() }`. 재대결·나가기 버튼을 연결한다.
+  - 결과 발표: `createResult(ctx, sound): { show(s): Promise<void>, hide() }` (효과음은 먼저 만든 것을 넘긴다). 재대결·나가기 버튼을 연결한다.
 - 조립: 구현 위치 `src/client/display/display.ts`. 효과음 → 알림 → 기록 → HUD → 상태창 → 결과 발표 순서로 만들고, `Display` 의 각 메서드를 해당 자식 함수에 그대로 넘긴다. `renderPlayers()` 인자가 없으면 `store.get('shown')` 을 쓰고, 그것도 없으면 아무것도 하지 않는다.
 - 문자열 안전: 사용자 이름·채팅처럼 밖에서 온 문자열을 HTML 로 넣을 때는 모든 자식이 같은 이스케이프 함수 `esc`(`& < > " '` 를 엔티티로)를 쓴다. `esc` 는 알림 leaf 가 공개한다.
 

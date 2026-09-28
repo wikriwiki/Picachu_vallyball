@@ -3,7 +3,7 @@ pyramid: node
 id: server
 title: 서버
 parent: ../capstone.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**
@@ -59,7 +59,7 @@ Node.js 프로세스 하나로 돌아가는 게임 서버다. 빌드된 클라�
 ## 수용 기준
 - `startServer({ port: 0 })` 로 띄우고 `/health` 에 요청하면 `ok` 를 받는다.
 - WebSocket 클라이언트 두 개가 `create`·`join` 으로 같은 방에 들어가 `start` 하면 둘 다 `state` 메시지를 받는다.
-- 모든 플레이어가 CPU 인 방을 `delayScale: 0.01` 로 시작하면 사람이 조작하지 않아도 결과 발표(`phase: 'ended'`)까지 진행된다.
+- 사람 1명과 CPU 2명인 방을 `delayScale` 을 아주 작게, 사람 대기(`turnTimeout`)를 1ms 로 두고 시작하면 아무도 조작하지 않아도 결과 발표(`phase: 'ended'`)까지 진행된다 (방은 사람이 만들어야 하므로 사람은 자동 진행으로 대신한다).
 - 잘못된 JSON 이나 알 수 없는 `type` 의 메시지는 서버를 멈추지 않는다 (JSON 오류는 무시, 알 수 없는 타입은 `error` 응답).
 - 게임 중 끊긴 사람이 같은 토큰으로 `join` 하면 같은 플레이어 ID 로 돌아오고 현재 상태를 받는다.
 

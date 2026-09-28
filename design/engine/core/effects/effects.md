@@ -3,7 +3,7 @@ pyramid: leaf
 id: effects
 title: 효과 연산
 parent: ../core.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**
@@ -49,14 +49,14 @@ status: designed
 11. `doublePositive(e)`: 복사본에서 `int`, `phy`, `sen`, `love` 가 양수면 2배, `money` 가 양수인 수면 2배, `'salary'` 면 `'salary2'`. 음수와 `fortune` 등은 그대로.
 
 ## 경계 조건
-- 현금 100 에서 −2500 이면 money 이벤트 −2500, 어음 3장 발행(현금 500), note 이벤트 count 3.
+- 현금 100 에서 −2500 이면 money 이벤트 −2500, 어음 3장 발행(현금 600), note 이벤트 count 3.
 - 능력치 98 에 +5 면 100, stat 이벤트 delta 2. 100 에 +5 면 이벤트 없음.
 - 어른 전 시대에 카드 주머니가 승진 카드만 연속으로 나와도 다른 카드가 나올 때까지 뽑는다.
 
 ## 테스트 케이스
 | # | Given | When | Then |
 |---|---|---|---|
-| 1 | 현금 100 | `addMoney(−2500)` | 현금 500, notes 3, 이벤트 money·note(count 3, total 3) |
+| 1 | 현금 100 | `addMoney(−2500)` | 현금 600, notes 3, 이벤트 money·note(count 3, total 3) |
 | 2 | 현금 0 | `addMoney(0)` | 이벤트 없음 |
 | 3 | int 98 | `addStat(int, 5)` / 다시 | delta 2 value 100 / 이벤트 없음 |
 | 4 | fortune 6 | `addFortune(1)` | 이벤트 없음 |

@@ -3,7 +3,7 @@ pyramid: node
 id: core
 title: 엔진 코어
 parent: ../engine.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**

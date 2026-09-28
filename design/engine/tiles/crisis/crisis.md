@@ -3,7 +3,7 @@ pyramid: leaf
 id: crisis
 title: 위기 칸
 parent: ../tiles.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**

@@ -3,7 +3,7 @@ pyramid: leaf
 id: fx
 title: 환경·효과 재질
 parent: ../toolkit.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**

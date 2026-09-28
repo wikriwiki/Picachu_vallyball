@@ -3,7 +3,7 @@ pyramid: leaf
 id: toon
 title: 툰 재질
 parent: ../toolkit.md
-status: designed
+status: implemented
 ---
 
 > **작성 규칙 — 이 파일을 읽거나 고치기 전에 확인**
